@@ -109,21 +109,25 @@ export default function PaperGenerator() {
 
     // Compute weightage recap stats
     const weightageSummary = React.useMemo(() => {
-        if (!weightage?.rules) return { total: 0, easy: 0, medium: 0, hard: 0 };
-        let total = 0, easy = 0, medium = 0, hard = 0;
+        if (!weightage?.rules) return { total: 0, easy: 0, medium: 0, hard: 0, studentTotal: 0 };
+        let total = 0, easy = 0, medium = 0, hard = 0, studentTotal = 0;
         weightage.rules.forEach((r) => {
             easy += r.easy_count || 0;
             medium += r.medium_count || 0;
             hard += r.hard_count || 0;
+            studentTotal += (r.student_easy_count || 0) + (r.student_medium_count || 0) + (r.student_hard_count || 0);
         });
         total = easy + medium + hard;
-        return { total, easy, medium, hard };
+        return { total, easy, medium, hard, studentTotal };
     }, [weightage]);
 
     const targetQuestions = exam?.questions_per_shift || 75;
+    const targetStudentQuestions = exam?.questions_per_candidate || 30;
     const isWeightageMatch = weightageSummary.total === targetQuestions;
+    const isStudentMatch = weightageSummary.studentTotal === targetStudentQuestions;
     const hasShortfalls = (validation?.shortfalls?.length || 0) > 0;
-    const isReadyToGenerate = isWeightageMatch && !hasShortfalls && shifts.length >= numShifts;
+    const hasStudentShortfalls = (validation?.studentShortfalls?.length || 0) > 0;
+    const isReadyToGenerate = isWeightageMatch && isStudentMatch && !hasShortfalls && !hasStudentShortfalls && shifts.length >= numShifts;
 
     return (
         <AdminLayout
@@ -242,19 +246,32 @@ export default function PaperGenerator() {
                         </a>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                        <div className={`p-3 rounded-xl border ${
-                            isWeightageMatch ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'
+                    <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+                        <div className={`col-span-2 p-3 rounded-xl border flex justify-between items-center ${
+                            isWeightageMatch && isStudentMatch ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'
                         }`}>
-                            <span className="text-[10px] font-bold uppercase text-gray-400 block">Total Qs / Shift</span>
-                            <div className="text-xl font-black text-white mt-1">
-                                {weightageSummary.total} / {targetQuestions}
+                            <div>
+                                <span className="text-[10px] font-bold uppercase text-gray-400 block">Shift Pool</span>
+                                <div className="text-xl font-black text-white mt-1">
+                                    {weightageSummary.total} / {targetQuestions}
+                                </div>
+                                <span className={`text-[10px] font-semibold mt-0.5 block ${
+                                    isWeightageMatch ? 'text-green-400' : 'text-red-400'
+                                }`}>
+                                    {isWeightageMatch ? '✓ Exact match' : 'Diff: ' + (weightageSummary.total - targetQuestions)}
+                                </span>
                             </div>
-                            <span className={`text-[10px] font-semibold mt-0.5 block ${
-                                isWeightageMatch ? 'text-green-400' : 'text-red-400'
-                            }`}>
-                                {isWeightageMatch ? '✓ Exact target match' : `Diff: ${weightageSummary.total - targetQuestions}`}
-                            </span>
+                            <div className="text-right">
+                                <span className="text-[10px] font-bold uppercase text-gray-400 block">Per Student</span>
+                                <div className="text-xl font-black text-white mt-1">
+                                    {weightageSummary.studentTotal} / {targetStudentQuestions}
+                                </div>
+                                <span className={`text-[10px] font-semibold mt-0.5 block ${
+                                    isStudentMatch ? 'text-green-400' : 'text-red-400'
+                                }`}>
+                                    {isStudentMatch ? '✓ Exact match' : 'Diff: ' + (weightageSummary.studentTotal - targetStudentQuestions)}
+                                </span>
+                            </div>
                         </div>
 
                         <div className="p-3 bg-[#180d0d] rounded-xl border border-white/10">
@@ -348,14 +365,14 @@ export default function PaperGenerator() {
                         </div>
                     </div>
 
-                    {hasShortfalls ? (
+                    {(hasShortfalls || hasStudentShortfalls) ? (
                         <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 space-y-3">
                             <div className="flex items-center space-x-2 text-red-400 text-xs font-bold">
                                 <span className="material-symbols-outlined text-[18px]">error</span>
-                                <span>Question Bank Shortfall ({validation.shortfalls.length} Topic Pools Deficient)</span>
+                                <span>Question Bank Shortfall ({(validation?.shortfalls?.length || 0) + (validation?.studentShortfalls?.length || 0)} Topic Pools Deficient)</span>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                                {validation.shortfalls.map((sf, idx) => (
+                                {(validation?.shortfalls || []).map((sf, idx) => (
                                     <div key={idx} className="p-2.5 bg-[#180d0d] border border-red-500/20 rounded-lg text-xs">
                                         <div className="font-bold text-white">{sf.topic_name}</div>
                                         <div className="text-gray-400 text-[11px] capitalize">{sf.difficulty} difficulty</div>
@@ -363,6 +380,17 @@ export default function PaperGenerator() {
                                             <span>Needed: {sf.totalNeededForShifts}</span>
                                             <span>Bank: {sf.availableInBank}</span>
                                             <span className="text-red-400 font-bold">Deficit: {sf.shortfall}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                                {(validation?.studentShortfalls || []).map((sf, idx) => (
+                                    <div key={'s_'+idx} className="p-2.5 bg-[#180d0d] border border-red-500/20 rounded-lg text-xs">
+                                        <div className="font-bold text-white">{sf.topic_name}</div>
+                                        <div className="text-gray-400 text-[11px] capitalize">{sf.difficulty} difficulty</div>
+                                        <div className="text-[11px] text-gray-300 mt-1 flex justify-between">
+                                            <span>Student: {sf.student_quota}</span>
+                                            <span>Shift Pool: {sf.shift_pool}</span>
+                                            <span className="text-red-400 font-bold">Deficit: {sf.student_quota - sf.shift_pool}</span>
                                         </div>
                                     </div>
                                 ))}

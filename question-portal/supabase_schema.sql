@@ -46,28 +46,24 @@ CREATE TABLE IF NOT EXISTS cloud_questions (
 -- SEED: Pre-defined subjects and topics
 -- ============================================================
 INSERT INTO cloud_subjects (name) VALUES
-  ('Mathematics'),('English'),('C Programming'),('Aptitude'),('Reasoning')
+  ('Mathematics'),('English'),('C Programming'),('Aptitude')
 ON CONFLICT (name) DO NOTHING;
 
 INSERT INTO cloud_topics (subject_id, name)
-SELECT id, unnest(ARRAY['Algebra','Calculus','Trigonometry','Statistics & Probability','Number Theory','Geometry','Matrices & Determinants'])
+SELECT id, unnest(ARRAY['Algebra','Geometry and Vectors','Calculus','Trigonometry','Probability','P&C'])
 FROM cloud_subjects WHERE name = 'Mathematics' ON CONFLICT DO NOTHING;
 
 INSERT INTO cloud_topics (subject_id, name)
-SELECT id, unnest(ARRAY['Grammar','Vocabulary','Reading Comprehension','Error Detection','Fill in the Blanks','Sentence Rearrangement','Synonyms & Antonyms'])
+SELECT id, unnest(ARRAY['General'])
 FROM cloud_subjects WHERE name = 'English' ON CONFLICT DO NOTHING;
 
 INSERT INTO cloud_topics (subject_id, name)
-SELECT id, unnest(ARRAY['Basics & Syntax','Pointers','Arrays & Strings','Functions & Recursion','Structures & Unions','File I/O','Dynamic Memory','Preprocessor'])
+SELECT id, unnest(ARRAY['General'])
 FROM cloud_subjects WHERE name = 'C Programming' ON CONFLICT DO NOTHING;
 
 INSERT INTO cloud_topics (subject_id, name)
-SELECT id, unnest(ARRAY['Time & Work','Speed, Distance & Time','Percentages','Profit & Loss','Ratios & Proportions','Simple & Compound Interest','Averages','Mixtures & Allegations'])
+SELECT id, unnest(ARRAY['General Aptitude','Verbal Aptitude','Non Verbal Aptitude'])
 FROM cloud_subjects WHERE name = 'Aptitude' ON CONFLICT DO NOTHING;
-
-INSERT INTO cloud_topics (subject_id, name)
-SELECT id, unnest(ARRAY['Logical Reasoning','Verbal Reasoning','Non-Verbal Reasoning','Puzzles & Seating Arrangement','Series & Patterns','Blood Relations','Direction Sense','Coding & Decoding'])
-FROM cloud_subjects WHERE name = 'Reasoning' ON CONFLICT DO NOTHING;
 
 -- ============================================================
 -- Row Level Security

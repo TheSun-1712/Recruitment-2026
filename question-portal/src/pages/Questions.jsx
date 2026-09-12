@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
-const SUBJECTS = ['Mathematics', 'English', 'C Programming', 'Aptitude', 'Reasoning'];
+const SUBJECTS = ['Mathematics', 'English', 'C Programming', 'Aptitude'];
 const DIFFICULTIES = ['easy', 'medium', 'hard'];
 
 export default function Questions({ onLogout }) {

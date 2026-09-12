@@ -221,23 +221,73 @@ router.post('/join', async (req, res) => {
             [candidate.shift_id, candidate.id]
         );
 
-        // 2. Fetch shift questions in RANDOM order for this candidate
-        const shiftQuestionsRes = await client.query(
-            `SELECT question_id 
-             FROM shift_questions 
-             WHERE shift_id = $1 
-             ORDER BY RANDOM()`,
+        // 2. Fetch student-level weightage rules and pick exactly the right number per topic/difficulty bucket
+        const weightageRes = await client.query(
+            `SELECT 
+                wr.topic_id,
+                wr.student_easy_count,
+                wr.student_medium_count,
+                wr.student_hard_count
+             FROM weightage_rules wr
+             JOIN shifts s ON s.exam_id = wr.exam_id
+             WHERE s.id = $1
+             AND (wr.student_easy_count + wr.student_medium_count + wr.student_hard_count) > 0`,
             [candidate.shift_id]
         );
 
-        if (shiftQuestionsRes.rows.length === 0) {
+        // Check that question paper was generated for the shift
+        const shiftCheckRes = await client.query(
+            'SELECT COUNT(*) FROM shift_questions WHERE shift_id = $1',
+            [candidate.shift_id]
+        );
+        if (parseInt(shiftCheckRes.rows[0].count, 10) === 0) {
             await client.query('ROLLBACK');
             return res.status(400).json({
                 error: `Question paper has not been generated for shift '${candidate.shift_name}'. Please contact the invigilator.`,
             });
         }
 
-        const assignedQuestionIds = shiftQuestionsRes.rows.map((r) => r.question_id);
+        // If no student quotas configured, fall back to all shift questions
+        const assignedQuestionIds = [];
+        if (weightageRes.rows.length === 0) {
+            const fallback = await client.query(
+                'SELECT question_id FROM shift_questions WHERE shift_id = $1 ORDER BY RANDOM()',
+                [candidate.shift_id]
+            );
+            assignedQuestionIds.push(...fallback.rows.map(r => r.question_id));
+        } else {
+            // Quota-driven selection: pick N questions per topic/difficulty bucket from shift pool
+            const diffs = ['easy', 'medium', 'hard'];
+            for (const rule of weightageRes.rows) {
+                for (const diff of diffs) {
+                    const quota = parseInt(rule[`student_${diff}_count`], 10) || 0;
+                    if (quota === 0) continue;
+                    const bucketRes = await client.query(
+                        `SELECT sq.question_id
+                         FROM shift_questions sq
+                         JOIN questions q ON q.id = sq.question_id
+                         WHERE sq.shift_id = $1
+                           AND q.topic_id = $2
+                           AND q.difficulty = $3
+                         ORDER BY RANDOM()
+                         LIMIT $4`,
+                        [candidate.shift_id, rule.topic_id, diff, quota]
+                    );
+                    if (bucketRes.rows.length < quota) {
+                        await client.query('ROLLBACK');
+                        return res.status(400).json({
+                            error: `Not enough questions in shift pool for topic_id=${rule.topic_id} difficulty=${diff}. Need ${quota}, found ${bucketRes.rows.length}.`,
+                        });
+                    }
+                    assignedQuestionIds.push(...bucketRes.rows.map(r => r.question_id));
+                }
+            }
+            // Shuffle the final 30-question array so order is random
+            for (let i = assignedQuestionIds.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [assignedQuestionIds[i], assignedQuestionIds[j]] = [assignedQuestionIds[j], assignedQuestionIds[i]];
+            }
+        }
 
         // 3. Insert unique positions 1..N into candidate_questions (with ON CONFLICT DO NOTHING)
         for (let i = 0; i < assignedQuestionIds.length; i++) {

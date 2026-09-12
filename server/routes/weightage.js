@@ -76,20 +76,26 @@ router.put('/:examId', async (req, res) => {
             const easy = Math.max(0, parseInt(r.easy_count, 10) || 0);
             const medium = Math.max(0, parseInt(r.medium_count, 10) || 0);
             const hard = Math.max(0, parseInt(r.hard_count, 10) || 0);
+            const studentEasy = Math.max(0, parseInt(r.student_easy_count, 10) || 0);
+            const studentMedium = Math.max(0, parseInt(r.student_medium_count, 10) || 0);
+            const studentHard = Math.max(0, parseInt(r.student_hard_count, 10) || 0);
 
             if (!topicId) continue;
 
             const resRow = await client.query(
                 `INSERT INTO weightage_rules 
-                    (exam_id, topic_id, easy_count, medium_count, hard_count)
-                 VALUES ($1, $2, $3, $4, $5)
+                    (exam_id, topic_id, easy_count, medium_count, hard_count, student_easy_count, student_medium_count, student_hard_count)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                  ON CONFLICT (exam_id, topic_id) 
                  DO UPDATE SET 
                      easy_count = EXCLUDED.easy_count,
                      medium_count = EXCLUDED.medium_count,
-                     hard_count = EXCLUDED.hard_count
+                     hard_count = EXCLUDED.hard_count,
+                     student_easy_count = EXCLUDED.student_easy_count,
+                     student_medium_count = EXCLUDED.student_medium_count,
+                     student_hard_count = EXCLUDED.student_hard_count
                  RETURNING *`,
-                [examId, topicId, easy, medium, hard]
+                [examId, topicId, easy, medium, hard, studentEasy, studentMedium, studentHard]
             );
             upserted.push(resRow.rows[0]);
         }
@@ -185,9 +191,35 @@ router.get('/:examId/validate', async (req, res) => {
             }
         }
 
+        // Check student quotas: student_X_count must not exceed shift pool count
+        const studentShortfalls = [];
+        const studentDiffs = ['easy', 'medium', 'hard'];
+        let grandStudentTotal = 0;
+        for (const r of rulesRes.rows) {
+            for (const diff of studentDiffs) {
+                const studentCount = parseInt(r[`student_${diff}_count`], 10) || 0;
+                const shiftCount = parseInt(r[`${diff}_count`], 10) || 0;
+                grandStudentTotal += studentCount;
+                if (studentCount > shiftCount) {
+                    studentShortfalls.push({
+                        topic_name: r.topic_name,
+                        subject_name: r.subject_name,
+                        difficulty: diff,
+                        student_quota: studentCount,
+                        shift_pool: shiftCount,
+                    });
+                }
+            }
+        }
+
+        const examConfig = examRes.rows[0];
+        const targetStudentTotal = examConfig.questions_per_candidate || 30;
+        const isStudentTotalMatch = grandStudentTotal === targetStudentTotal;
+        const hasStudentShortfall = studentShortfalls.length > 0;
+
         const isTotalMatch = grandTotal === targetTotal;
         const hasShortfall = shortfalls.length > 0;
-        const isValid = isTotalMatch && !hasShortfall;
+        const isValid = isTotalMatch && !hasShortfall && isStudentTotalMatch && !hasStudentShortfall;
 
         res.json({
             valid: isValid,
@@ -198,6 +230,11 @@ router.get('/:examId/validate', async (req, res) => {
             isTotalMatch,
             shortfallCount: shortfalls.length,
             shortfalls,
+            // Student quota
+            studentTotalConfigured: grandStudentTotal,
+            targetStudentTotal,
+            isStudentTotalMatch,
+            studentShortfalls,
             rulesBreakdown: rulesRes.rows,
         });
     } catch (err) {

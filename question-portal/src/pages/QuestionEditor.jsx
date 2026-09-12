@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import katex from 'katex';
+import ImageEditorModal from '../components/ImageEditorModal';
 
 const DIFFICULTIES = ['easy', 'medium', 'hard'];
 
@@ -95,6 +96,10 @@ export default function QuestionEditor({ onLogout }) {
   const [error, setError] = useState('');
   const [dragOver, setDragOver] = useState(false);
 
+  const [editorModalOpen, setEditorModalOpen] = useState(false);
+  const [editorImageSrc, setEditorImageSrc] = useState('');
+  const [editorImageType, setEditorImageType] = useState('');
+
   useEffect(() => {
     supabase.from('cloud_subjects').select('*').order('name').then(({ data }) => setSubjects(data || []));
     supabase.from('cloud_topics').select('*').order('name').then(({ data }) => setTopics(data || []));
@@ -156,15 +161,35 @@ export default function QuestionEditor({ onLogout }) {
     }
   }
 
+  function openEditor(file, type) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setEditorImageSrc(reader.result);
+      setEditorImageType(type);
+      setEditorModalOpen(true);
+    };
+    reader.readAsDataURL(file);
+  }
+
   function handleFileDrop(e) {
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer?.files?.[0] || e.target?.files?.[0];
     if (file && file.type.startsWith('image/')) {
-      setImageFile(file);
-      setImagePreview(URL.createObjectURL(file));
-      handleImageUpload(file, 'main');
+      openEditor(file, 'main');
     }
+  }
+
+  function handleSaveCrop(croppedFile) {
+    setEditorModalOpen(false);
+    if (!croppedFile) return;
+    
+    if (editorImageType === 'main') {
+      setImageFile(croppedFile);
+      setImagePreview(URL.createObjectURL(croppedFile));
+    }
+    handleImageUpload(croppedFile, editorImageType);
   }
 
   async function handleSave(e) {
@@ -216,6 +241,13 @@ export default function QuestionEditor({ onLogout }) {
 
   return (
     <div style={{ minHeight: '100vh', background: '#0a0606' }}>
+      {editorModalOpen && (
+        <ImageEditorModal
+          imageSrc={editorImageSrc}
+          onClose={() => setEditorModalOpen(false)}
+          onSave={handleSaveCrop}
+        />
+      )}
       {/* Navbar */}
       <nav style={{
         background: '#110909', borderBottom: '1px solid rgba(255,255,255,0.06)',
@@ -298,10 +330,10 @@ export default function QuestionEditor({ onLogout }) {
           {/* Options */}
           <div className="card" style={{ marginBottom: 20 }}>
             <label className="field-label" style={{ marginBottom: 14 }}>Answer Options * <span style={{ color: '#475569', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>— select the correct answer</span></label>
-            <OptionField label="A" value={optA} onChange={setOptA} isCorrect={correctOpt === 'a'} onMarkCorrect={() => setCorrectOpt('a')} imageUrl={optAImageUrl} onImageUpload={f => handleImageUpload(f, 'optA')} onImageRemove={() => setOptAImageUrl('')} />
-            <OptionField label="B" value={optB} onChange={setOptB} isCorrect={correctOpt === 'b'} onMarkCorrect={() => setCorrectOpt('b')} imageUrl={optBImageUrl} onImageUpload={f => handleImageUpload(f, 'optB')} onImageRemove={() => setOptBImageUrl('')} />
-            <OptionField label="C" value={optC} onChange={setOptC} isCorrect={correctOpt === 'c'} onMarkCorrect={() => setCorrectOpt('c')} imageUrl={optCImageUrl} onImageUpload={f => handleImageUpload(f, 'optC')} onImageRemove={() => setOptCImageUrl('')} />
-            <OptionField label="D" value={optD} onChange={setOptD} isCorrect={correctOpt === 'd'} onMarkCorrect={() => setCorrectOpt('d')} imageUrl={optDImageUrl} onImageUpload={f => handleImageUpload(f, 'optD')} onImageRemove={() => setOptDImageUrl('')} />
+            <OptionField label="A" value={optA} onChange={setOptA} isCorrect={correctOpt === 'a'} onMarkCorrect={() => setCorrectOpt('a')} imageUrl={optAImageUrl} onImageUpload={f => openEditor(f, 'optA')} onImageRemove={() => setOptAImageUrl('')} />
+            <OptionField label="B" value={optB} onChange={setOptB} isCorrect={correctOpt === 'b'} onMarkCorrect={() => setCorrectOpt('b')} imageUrl={optBImageUrl} onImageUpload={f => openEditor(f, 'optB')} onImageRemove={() => setOptBImageUrl('')} />
+            <OptionField label="C" value={optC} onChange={setOptC} isCorrect={correctOpt === 'c'} onMarkCorrect={() => setCorrectOpt('c')} imageUrl={optCImageUrl} onImageUpload={f => openEditor(f, 'optC')} onImageRemove={() => setOptCImageUrl('')} />
+            <OptionField label="D" value={optD} onChange={setOptD} isCorrect={correctOpt === 'd'} onMarkCorrect={() => setCorrectOpt('d')} imageUrl={optDImageUrl} onImageUpload={f => openEditor(f, 'optD')} onImageRemove={() => setOptDImageUrl('')} />
           </div>
 
           {/* Explanation + Image */}

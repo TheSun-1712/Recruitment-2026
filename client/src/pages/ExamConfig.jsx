@@ -7,6 +7,8 @@ export default function ExamConfig() {
     const [stats, setStats] = useState(null);
     const [name, setName] = useState('');
     const [graceMinutes, setGraceMinutes] = useState(15);
+    const [questionsPerCandidate, setQuestionsPerCandidate] = useState(30);
+    const [questionsPerShift, setQuestionsPerShift] = useState(75);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState('');
@@ -21,6 +23,8 @@ export default function ExamConfig() {
                 setExam(data.exam);
                 setName(data.exam.name || '');
                 setGraceMinutes(data.exam.grace_join_min || 15);
+                setQuestionsPerCandidate(data.exam.questions_per_candidate || 30);
+                setQuestionsPerShift(data.exam.questions_per_shift || 75);
                 setStats(data.stats);
             }
         } catch (err) {
@@ -48,6 +52,8 @@ export default function ExamConfig() {
                     body: JSON.stringify({
                         name,
                         grace_join_min: parseInt(graceMinutes, 10),
+                        questions_per_shift: parseInt(questionsPerShift, 10),
+                        questions_per_candidate: parseInt(questionsPerCandidate, 10),
                     }),
                 });
                 setExam(res.exam);
@@ -60,7 +66,8 @@ export default function ExamConfig() {
                         name,
                         grace_join_min: parseInt(graceMinutes, 10),
                         total_duration_min: 60,
-                        questions_per_shift: 75,
+                        questions_per_shift: parseInt(questionsPerShift, 10) || 75,
+                        questions_per_candidate: parseInt(questionsPerCandidate, 10) || 30,
                     }),
                 });
                 setExam(res.exam);
@@ -194,17 +201,37 @@ export default function ExamConfig() {
                             </div>
                         </div>
 
-                        <div>
-                            <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                                Questions Per Shift Pool
-                            </label>
-                            <input
-                                type="text"
-                                readOnly
-                                value="75 Questions"
-                                className="w-full bg-black/20 border border-white/5 rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
-                            />
-                            <p className="text-[11px] text-gray-500 mt-1">Each candidate receives 75 questions shuffled uniquely.</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                                    Questions Per Shift Pool
+                                </label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    required
+                                    value={questionsPerShift}
+                                    onChange={(e) => setQuestionsPerShift(e.target.value)}
+                                    disabled={stats?.any_paper_generated}
+                                    className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500 transition disabled:text-gray-500 disabled:cursor-not-allowed"
+                                />
+                                <p className="text-[11px] text-gray-500 mt-1">Total questions in each shift's pool (e.g. 75).</p>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                                    Questions Per Candidate
+                                </label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    required
+                                    value={questionsPerCandidate}
+                                    onChange={(e) => setQuestionsPerCandidate(e.target.value)}
+                                    disabled={stats?.any_paper_generated}
+                                    className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500 transition disabled:text-gray-500 disabled:cursor-not-allowed"
+                                />
+                                <p className="text-[11px] text-gray-500 mt-1">Each student gets this many questions (e.g. 30).</p>
+                            </div>
                         </div>
 
                         {stats?.any_paper_generated && (
