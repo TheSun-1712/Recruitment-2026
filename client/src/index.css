@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+    .opulence-title-font {
+        font-family: 'Cormorant Garamond', serif;
+    }
+}
+
+@layer base {
+    html {
+        scroll-behavior: smooth;
+        height: 100%;
+    }
+
+    body {
+        margin: 0;
+        padding: 0;
+        overflow-x: hidden;
+        min-height: 100%;
+        position: relative;
+        font-family: "Space Grotesk", sans-serif;
+    }
+
+    ::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: #120403;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: #c2410c;
+        border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: #ea580c;
+    }
+}

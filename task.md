@@ -1,0 +1,13 @@
+- [x] Research backend routes to understand question query structure
+- [x] Check DB schema for `sample_input` field
+- [x] Write & audit implementation plan
+- [/] Execute: Add `sample_input` column to DB via migration SQL
+- [ ] Execute: Update 3 backend routes to include `sample_input` in SELECT queries
+  - [ ] Update rapidfire.js (2 SELECT queries)
+  - [ ] Update cascade.js (2 SELECT queries)
+  - [ ] Update dsa.js (2 SELECT queries)
+- [ ] Execute: Update 3 frontend contest pages
+  - [ ] Update RapidfireContest.jsx
+  - [ ] Update DSAContest.jsx
+  - [ ] Update CascadeContest.jsx
+- [ ] Verify changes work correctly
