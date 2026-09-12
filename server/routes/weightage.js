@@ -26,6 +26,9 @@ router.get('/:examId', async (req, res) => {
                 wr.easy_count,
                 wr.medium_count,
                 wr.hard_count,
+                wr.student_easy_count,
+                wr.student_medium_count,
+                wr.student_hard_count,
                 (wr.easy_count + wr.medium_count + wr.hard_count) AS row_total
              FROM weightage_rules wr
              JOIN topics t ON t.id = wr.topic_id
