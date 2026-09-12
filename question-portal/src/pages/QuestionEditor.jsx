@@ -23,7 +23,7 @@ function KaTeXPreview({ text, placeholder = 'Preview will appear here...' }) {
   return <div ref={ref} className="katex-preview" />;
 }
 
-function OptionField({ label, value, onChange, isCorrect, onMarkCorrect }) {
+function OptionField({ label, value, onChange, isCorrect, onMarkCorrect, imageUrl, onImageUpload, onImageRemove }) {
   const [showPreview, setShowPreview] = useState(false);
   return (
     <div style={{ marginBottom: 12 }}>
@@ -41,6 +41,22 @@ function OptionField({ label, value, onChange, isCorrect, onMarkCorrect }) {
       </div>
       <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={`Option ${label} (supports $LaTeX$)`} />
       {showPreview && <div style={{ marginTop: 5 }}><KaTeXPreview text={value} placeholder={`Option ${label} preview`} /></div>}
+      
+      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+        {imageUrl ? (
+          <div style={{ position: 'relative', display: 'inline-block' }}>
+            <img src={imageUrl} alt={`Option ${label}`} style={{ height: 40, borderRadius: 4, border: '1px solid #334155' }} />
+            <button type="button" onClick={onImageRemove} style={{ position: 'absolute', top: -6, right: -6, background: '#ef4444', color: '#fff', border: 'none', borderRadius: '50%', width: 16, height: 16, fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+          </div>
+        ) : (
+          <label style={{ fontSize: 11, color: '#64748b', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+            <span style={{ fontSize: 16 }}>🖼️</span> Add Image
+            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => {
+              if (e.target.files[0]) onImageUpload(e.target.files[0]);
+            }} />
+          </label>
+        )}
+      </div>
     </div>
   );
 }
@@ -68,6 +84,10 @@ export default function QuestionEditor({ onLogout }) {
   const [imageUrl, setImageUrl] = useState('');
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
+  const [optAImageUrl, setOptAImageUrl] = useState('');
+  const [optBImageUrl, setOptBImageUrl] = useState('');
+  const [optCImageUrl, setOptCImageUrl] = useState('');
+  const [optDImageUrl, setOptDImageUrl] = useState('');
 
   const [showBodyPreview, setShowBodyPreview] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -105,21 +125,30 @@ export default function QuestionEditor({ onLogout }) {
       setExplanation(data.explanation || '');
       setImageUrl(data.image_url || '');
       if (data.image_url) setImagePreview(data.image_url);
+      setOptAImageUrl(data.opt_a_image_url || '');
+      setOptBImageUrl(data.opt_b_image_url || '');
+      setOptCImageUrl(data.opt_c_image_url || '');
+      setOptDImageUrl(data.opt_d_image_url || '');
     });
   }, [id, isEdit]);
 
-  async function handleImageUpload(file) {
+  async function handleImageUpload(file, type = 'main') {
     if (!file) return;
     const ext = file.name.split('.').pop();
-    const path = `questions/${Date.now()}.${ext}`;
+    const path = `questions/${type}_${Date.now()}.${ext}`;
     setUploading(true);
     setError('');
     try {
       const { error: upErr } = await supabase.storage.from('question-images').upload(path, file, { upsert: true });
       if (upErr) throw upErr;
       const { data } = supabase.storage.from('question-images').getPublicUrl(path);
-      setImageUrl(data.publicUrl);
-      setImagePreview(data.publicUrl);
+      if (type === 'main') {
+        setImageUrl(data.publicUrl);
+        setImagePreview(data.publicUrl);
+      } else if (type === 'optA') setOptAImageUrl(data.publicUrl);
+      else if (type === 'optB') setOptBImageUrl(data.publicUrl);
+      else if (type === 'optC') setOptCImageUrl(data.publicUrl);
+      else if (type === 'optD') setOptDImageUrl(data.publicUrl);
     } catch (err) {
       setError('Image upload failed: ' + err.message);
     } finally {
@@ -134,7 +163,7 @@ export default function QuestionEditor({ onLogout }) {
     if (file && file.type.startsWith('image/')) {
       setImageFile(file);
       setImagePreview(URL.createObjectURL(file));
-      handleImageUpload(file);
+      handleImageUpload(file, 'main');
     }
   }
 
@@ -160,6 +189,10 @@ export default function QuestionEditor({ onLogout }) {
       correct_opt: correctOpt,
       explanation: explanation.trim() || null,
       image_url: imageUrl || null,
+      opt_a_image_url: optAImageUrl || null,
+      opt_b_image_url: optBImageUrl || null,
+      opt_c_image_url: optCImageUrl || null,
+      opt_d_image_url: optDImageUrl || null,
       synced_to_local: false,
     };
 
@@ -265,10 +298,10 @@ export default function QuestionEditor({ onLogout }) {
           {/* Options */}
           <div className="card" style={{ marginBottom: 20 }}>
             <label className="field-label" style={{ marginBottom: 14 }}>Answer Options * <span style={{ color: '#475569', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>— select the correct answer</span></label>
-            <OptionField label="A" value={optA} onChange={setOptA} isCorrect={correctOpt === 'a'} onMarkCorrect={() => setCorrectOpt('a')} />
-            <OptionField label="B" value={optB} onChange={setOptB} isCorrect={correctOpt === 'b'} onMarkCorrect={() => setCorrectOpt('b')} />
-            <OptionField label="C" value={optC} onChange={setOptC} isCorrect={correctOpt === 'c'} onMarkCorrect={() => setCorrectOpt('c')} />
-            <OptionField label="D" value={optD} onChange={setOptD} isCorrect={correctOpt === 'd'} onMarkCorrect={() => setCorrectOpt('d')} />
+            <OptionField label="A" value={optA} onChange={setOptA} isCorrect={correctOpt === 'a'} onMarkCorrect={() => setCorrectOpt('a')} imageUrl={optAImageUrl} onImageUpload={f => handleImageUpload(f, 'optA')} onImageRemove={() => setOptAImageUrl('')} />
+            <OptionField label="B" value={optB} onChange={setOptB} isCorrect={correctOpt === 'b'} onMarkCorrect={() => setCorrectOpt('b')} imageUrl={optBImageUrl} onImageUpload={f => handleImageUpload(f, 'optB')} onImageRemove={() => setOptBImageUrl('')} />
+            <OptionField label="C" value={optC} onChange={setOptC} isCorrect={correctOpt === 'c'} onMarkCorrect={() => setCorrectOpt('c')} imageUrl={optCImageUrl} onImageUpload={f => handleImageUpload(f, 'optC')} onImageRemove={() => setOptCImageUrl('')} />
+            <OptionField label="D" value={optD} onChange={setOptD} isCorrect={correctOpt === 'd'} onMarkCorrect={() => setCorrectOpt('d')} imageUrl={optDImageUrl} onImageUpload={f => handleImageUpload(f, 'optD')} onImageRemove={() => setOptDImageUrl('')} />
           </div>
 
           {/* Explanation + Image */}

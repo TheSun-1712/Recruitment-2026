@@ -105,13 +105,14 @@ router.post('/', async (req, res) => {
         // 5. Insert question into local DB
         await client.query(
           `INSERT INTO questions
-            (exam_id, topic_id, difficulty, body, option_a, option_b, option_c, option_d, correct_opt, explanation, image_url)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+            (exam_id, topic_id, difficulty, body, option_a, option_b, option_c, option_d, correct_opt, explanation, image_url, opt_a_image_url, opt_b_image_url, opt_c_image_url, opt_d_image_url)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
           [
             examId, topicId,
             q.difficulty, q.body,
             q.option_a, q.option_b, q.option_c, q.option_d,
             q.correct_opt, q.explanation || null, q.image_url || null,
+            q.opt_a_image_url || null, q.opt_b_image_url || null, q.opt_c_image_url || null, q.opt_d_image_url || null,
           ]
         );
 

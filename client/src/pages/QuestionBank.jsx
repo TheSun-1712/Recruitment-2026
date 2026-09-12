@@ -175,6 +175,10 @@ export default function QuestionBank() {
             option_b: q.option_b || '',
             option_c: q.option_c || '',
             option_d: q.option_d || '',
+            opt_a_image_url: q.opt_a_image_url || '',
+            opt_b_image_url: q.opt_b_image_url || '',
+            opt_c_image_url: q.opt_c_image_url || '',
+            opt_d_image_url: q.opt_d_image_url || '',
             correct_opt: q.correct_opt || 'a',
             explanation: q.explanation || '',
         });
@@ -480,7 +484,7 @@ export default function QuestionBank() {
                                             </span>
                                         </td>
                                         <td className="px-4 py-3">
-                                            {q.image_url ? (
+                                            {q.image_url || q.opt_a_image_url || q.opt_b_image_url || q.opt_c_image_url || q.opt_d_image_url ? (
                                                 <span className="material-symbols-outlined text-green-400 text-[18px]">image</span>
                                             ) : (
                                                 <span className="text-gray-600">—</span>
@@ -761,6 +765,15 @@ export default function QuestionBank() {
                                                             <KaTeXRenderer content={optText} />
                                                         ) : (
                                                             <span className="text-gray-600 italic">Empty option {opt.toUpperCase()}</span>
+                                                        )}
+                                                        {formData[`opt_${opt}_image_url`] && (
+                                                            <div className="mt-2">
+                                                                <img
+                                                                    src={formData[`opt_${opt}_image_url`].startsWith('http') ? formData[`opt_${opt}_image_url`] : `${API_URL}${formData[`opt_${opt}_image_url`]}`}
+                                                                    alt={`Option ${opt} image`}
+                                                                    className="max-h-20 rounded border border-white/10 shadow-sm object-contain"
+                                                                />
+                                                            </div>
                                                         )}
                                                     </div>
                                                     {isCorrect && (

@@ -33,6 +33,10 @@ CREATE TABLE IF NOT EXISTS cloud_questions (
   difficulty      TEXT NOT NULL CHECK(difficulty IN ('easy','medium','hard')),
   explanation     TEXT,
   image_url       TEXT,
+  opt_a_image_url TEXT,
+  opt_b_image_url TEXT,
+  opt_c_image_url TEXT,
+  opt_d_image_url TEXT,
   synced_to_local BOOLEAN NOT NULL DEFAULT false,
   created_by      TEXT DEFAULT 'admin',
   created_at      TIMESTAMPTZ DEFAULT NOW()

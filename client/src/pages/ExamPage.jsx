@@ -572,6 +572,15 @@ export default function ExamPage() {
                                                 </div>
                                                 <div className="flex-1 leading-relaxed">
                                                     <KaTeXRenderer text={optText || ''} />
+                                                    {currentQ[`opt_${optKey}_image_url`] && (
+                                                        <div className="mt-3">
+                                                            <img
+                                                                src={currentQ[`opt_${optKey}_image_url`].startsWith('http') ? currentQ[`opt_${optKey}_image_url`] : `${API_URL}${currentQ[`opt_${optKey}_image_url`]}`}
+                                                                alt={`Option ${opt} image`}
+                                                                className="max-h-32 rounded-lg border border-white/10 shadow-sm object-contain"
+                                                            />
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </button>
                                         );
