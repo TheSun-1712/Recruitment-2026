@@ -61,17 +61,13 @@ router.put('/:examId', async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        // Check if any shifts have paper already generated
-        const lockedCheck = await client.query(
-            `SELECT id FROM shifts WHERE exam_id = $1 AND paper_generated = true LIMIT 1`,
+        // F4: weightage remains editable after generation, but callers need a
+        // clear signal that existing papers still use the old blueprint.
+        const generatedPapers = await client.query(
+            `SELECT 1 FROM shifts WHERE exam_id = $1 AND paper_generated = true LIMIT 1`,
             [examId]
         );
-        if (lockedCheck.rows.length > 0) {
-            await client.query('ROLLBACK');
-            return res.status(400).json({
-                error: 'Weightage rules are locked because question papers have already been generated for this exam.',
-            });
-        }
+        const requiresRegeneration = generatedPapers.rows.length > 0;
 
         const upserted = [];
         for (const r of rules) {
@@ -104,7 +100,15 @@ router.put('/:examId', async (req, res) => {
         }
 
         await client.query('COMMIT');
-        res.json({ success: true, count: upserted.length, rules: upserted });
+        res.json({
+            success: true,
+            count: upserted.length,
+            rules: upserted,
+            locked: requiresRegeneration,
+            message: requiresRegeneration
+                ? 'Papers already exist. Regenerate the affected papers for this weightage to take effect.'
+                : undefined,
+        });
     } catch (err) {
         await client.query('ROLLBACK');
         console.error('PUT /admin/weightage/:examId error:', err);
@@ -118,6 +122,7 @@ router.put('/:examId', async (req, res) => {
 router.get('/:examId/validate', async (req, res) => {
     const { examId } = req.params;
     const numShifts = Math.max(1, parseInt(req.query.num_shifts, 10) || 1);
+    const allowOverlap = req.query.allow_overlap === 'true';
 
     try {
         const examRes = await pool.query('SELECT * FROM exam_config WHERE id = $1', [examId]);
@@ -174,7 +179,7 @@ router.get('/:examId/validate', async (req, res) => {
             for (const diff of difficulties) {
                 const countKey = `${diff}_count`;
                 const perShiftNeeded = parseInt(r[countKey], 10) || 0;
-                const totalNeeded = perShiftNeeded * numShifts;
+                const totalNeeded = allowOverlap ? perShiftNeeded : perShiftNeeded * numShifts;
 
                 if (totalNeeded > 0) {
                     const available = availableMap[`${r.topic_id}_${diff}`] || 0;

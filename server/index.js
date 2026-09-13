@@ -20,6 +20,7 @@ const paperGeneratorRoutes = require("./routes/papergenerator");
 const resultRoutes = require("./routes/results");
 const examEngineRoutes = require("./routes/examengine");
 const syncRoutes = require("./routes/sync");
+const gradingRoutes = require("./routes/grading");
 
 const app = express();
 
@@ -65,6 +66,7 @@ app.use("/admin/questions", questionBankRoutes);
 app.use("/admin/weightage", weightageRoutes);
 app.use("/admin/generate", paperGeneratorRoutes);
 app.use("/admin/results", resultRoutes);
+app.use("/admin/grading", gradingRoutes);
 
 // Cloud sync routes
 app.use("/admin/sync-questions", syncRoutes);

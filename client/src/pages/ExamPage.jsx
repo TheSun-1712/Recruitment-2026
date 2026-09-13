@@ -46,6 +46,9 @@ export default function ExamPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSubmitted, setIsSubmitted] = useState(false);
     const [submitResult, setSubmitResult] = useState(null);
+    const [isDisqualified, setIsDisqualified] = useState(() => {
+        return sessionStorage.getItem('exam_disqualified') === 'true';
+    });
     const [error, setError] = useState(null);
 
     const socketRef = useRef(null);
@@ -59,6 +62,13 @@ export default function ExamPage() {
             navigate('/login');
         }
     }, [session, navigate]);
+
+    // Ensure full screen mode on mount
+    useEffect(() => {
+        if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+            document.documentElement.requestFullscreen().catch(() => {});
+        }
+    }, []);
 
     const isSyncingRef = useRef(false);
     const isExpiredRef = useRef(false);
@@ -92,22 +102,40 @@ export default function ExamPage() {
         }
     }, [isSubmitted, session?.jwt]);
 
+    // Disqualification Handler (exceeding 10 violations)
+    const handleDisqualification = useCallback(async () => {
+        setIsDisqualified(true);
+        sessionStorage.setItem('exam_disqualified', 'true');
+        cleanupProctoring();
+
+        // Auto-submit the candidate exam session to freeze responses in backend
+        try {
+            await candidateFetch('/exam/submit', { method: 'POST' });
+        } catch (err) {
+            console.warn('Auto-submit on disqualify error:', err);
+        }
+
+        if (document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {});
+        }
+    }, []);
+
     // Proctoring Hook (BUG-04)
     const {
         showWarning,
+        warningTitle,
         warningMessage,
         warningButtonText,
         warningAction,
         violationCount,
+        maxViolations,
+        isViolation,
         cleanupProctoring,
     } = useContestProctoring('exam', {
-        contestEnded: isSubmitted,
+        contestEnded: isSubmitted || isDisqualified,
         teamName: session?.candidateName || session?.rollNo || 'Unknown',
         backendUrl: API_URL,
-        onDisqualify: () => {
-            sessionStorage.removeItem('examSession');
-            navigate('/login');
-        },
+        onDisqualify: handleDisqualification,
     });
 
     // Server re-sync on mount: catches page-refresh without visibilitychange firing
@@ -258,6 +286,61 @@ export default function ExamPage() {
         return { answered, unanswered, marked, total };
     }, [questions, answers, marks]);
 
+    // Group questions into contiguous sections based on subject_name
+    const sections = useMemo(() => {
+        if (!questions || questions.length === 0) return [];
+        const secList = [];
+        let currentSec = null;
+
+        questions.forEach((q, idx) => {
+            const subName = q.subject_name || 'General';
+            if (!currentSec || currentSec.name !== subName) {
+                currentSec = {
+                    name: subName,
+                    startIndex: idx,
+                    endIndex: idx,
+                    questions: [],
+                };
+                secList.push(currentSec);
+            }
+            currentSec.endIndex = idx;
+            currentSec.questions.push({ ...q, originalIndex: idx });
+        });
+
+        return secList;
+    }, [questions]);
+
+    // Active section derived from currentIndex
+    const currentSection = useMemo(() => {
+        return sections.find((s) => currentIndex >= s.startIndex && currentIndex <= s.endIndex) || sections[0] || null;
+    }, [sections, currentIndex]);
+
+    // Section-wise metrics (answered, marked, total)
+    const sectionMetrics = useMemo(() => {
+        return sections.map((sec) => {
+            let answered = 0;
+            let marked = 0;
+            sec.questions.forEach((q) => {
+                if (answers[q.question_id]) answered++;
+                if (marks[q.question_id]) marked++;
+            });
+            const total = sec.questions.length;
+            const unanswered = total - answered;
+            return {
+                name: sec.name,
+                startIndex: sec.startIndex,
+                endIndex: sec.endIndex,
+                answered,
+                marked,
+                unanswered,
+                total,
+            };
+        });
+    }, [sections, answers, marks]);
+
+    const relativeQuestionNumber = currentSection ? currentIndex - currentSection.startIndex + 1 : currentIndex + 1;
+    const sectionTotalQuestions = currentSection ? currentSection.questions.length : questions.length;
+
     const currentQ = questions[currentIndex];
 
     // Handle Option Selection
@@ -364,6 +447,71 @@ export default function ExamPage() {
         }
     }
 
+    // Disqualified Screen (Triggered automatically upon reaching 10 violations)
+    if (isDisqualified) {
+        return (
+            <div className="min-h-screen bg-[#0d0707] text-[#fbe9e7] flex items-center justify-center p-4 font-sans selection:bg-red-500 selection:text-white">
+                <div className="max-w-md w-full bg-[#180a0a] border border-red-500/50 rounded-2xl p-8 text-center shadow-2xl space-y-6 relative overflow-hidden">
+                    <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-64 h-32 bg-red-600/20 blur-3xl rounded-full pointer-events-none" />
+
+                    <div className="w-20 h-20 rounded-2xl bg-red-500/20 border border-red-500/50 text-red-400 flex items-center justify-center mx-auto shadow-xl shadow-red-500/20">
+                        <span className="material-symbols-outlined text-5xl">gpp_bad</span>
+                    </div>
+
+                    <div>
+                        <h2 className="text-2xl font-black text-white tracking-wide uppercase">
+                            Examination Terminated
+                        </h2>
+                        <p className="text-xs text-red-400 font-bold uppercase tracking-wider mt-1">
+                            Disqualified — 10 Violations Exceeded
+                        </p>
+                        <p className="text-xs text-gray-400 mt-2 leading-relaxed">
+                            You have exceeded the maximum threshold of 10 security infractions (such as exiting full screen mode or switching tabs). Your exam session has been automatically submitted and terminated.
+                        </p>
+                    </div>
+
+                    <div className="p-4 bg-[#120707] border border-red-500/20 rounded-xl text-left text-xs space-y-2 font-mono">
+                        <div className="flex justify-between">
+                            <span className="text-gray-400">Candidate:</span>
+                            <span className="text-white font-bold">{session?.candidateName || 'Candidate'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-gray-400">Roll Number:</span>
+                            <span className="text-red-400 font-bold">{session?.rollNo || '-'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-gray-400">Branch & Sec:</span>
+                            <span className="text-gray-300">{session?.branch} - {session?.section}</span>
+                        </div>
+                        <div className="flex justify-between pt-2 border-t border-red-500/20 text-sm">
+                            <span className="text-gray-300 font-bold">Total Violations:</span>
+                            <span className="text-red-400 font-black">10 / 10 (LIMIT EXCEEDED)</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                            <span className="text-gray-400">Status:</span>
+                            <span className="text-red-400 font-black uppercase">DISQUALIFIED</span>
+                        </div>
+                    </div>
+
+                    <div className="text-[11px] text-gray-500">
+                        Please contact your examination hall invigilator immediately.
+                    </div>
+
+                    <button
+                        onClick={() => {
+                            sessionStorage.removeItem('examSession');
+                            sessionStorage.removeItem('exam_disqualified');
+                            navigate('/login');
+                        }}
+                        className="w-full py-3.5 bg-white/10 hover:bg-white/15 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition cursor-pointer"
+                    >
+                        Return to Portal
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     // Completed Screen
     if (isSubmitted) {
         return (
@@ -417,13 +565,13 @@ export default function ExamPage() {
             {/* Proctoring Security Warning Overlay */}
             {showWarning && (
                 <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="bg-[#1c0a0a] border border-red-500/50 rounded-2xl max-w-md w-full p-8 shadow-2xl text-center space-y-5">
-                        <span className="material-symbols-outlined text-5xl text-red-400">security</span>
-                        <h2 className="text-xl font-black text-white">Security Violation Detected</h2>
+                    <div className={`bg-[#1c0a0a] border rounded-2xl max-w-md w-full p-8 shadow-2xl text-center space-y-5 ${isViolation ? 'border-red-500/50' : 'border-red-700/70'}`}>
+                        <span className="material-symbols-outlined text-5xl text-red-400">{isViolation ? 'security' : 'gpp_bad'}</span>
+                        <h2 className="text-xl font-black text-white">{warningTitle || 'Security Alert'}</h2>
                         <p className="text-sm text-gray-300 leading-relaxed">{warningMessage}</p>
-                        {violationCount > 0 && (
+                        {isViolation && violationCount > 0 && (
                             <div className="inline-block px-3 py-1 bg-red-900/40 border border-red-500/30 rounded-full text-xs font-mono text-red-300">
-                                Violations: {violationCount} / 10
+                                Violations: {violationCount} / {maxViolations}
                             </div>
                         )}
                         <button
@@ -497,18 +645,51 @@ export default function ExamPage() {
             {/* Main Exam Grid */}
             <div className="flex-1 max-w-7xl mx-auto w-full p-4 lg:p-6 grid grid-cols-1 xl:grid-cols-12 gap-6">
                 {/* Left Area: Active Question Card */}
-                <main className="xl:col-span-8 flex flex-col justify-between space-y-6">
+                <main className="xl:col-span-8 flex flex-col justify-between space-y-4">
+                    {/* Section Navigation Tabs */}
+                    {sections.length > 0 && (
+                        <div className="bg-[#140b0b] border border-white/10 rounded-2xl p-2 sm:p-2.5 flex items-center space-x-2 overflow-x-auto scrollbar-none shadow-lg">
+                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-2 shrink-0 hidden md:inline">
+                                Sections:
+                            </span>
+                            {sectionMetrics.map((sec) => {
+                                const isActive = currentSection?.name === sec.name;
+                                return (
+                                    <button
+                                        key={sec.name}
+                                        type="button"
+                                        onClick={() => setCurrentIndex(sec.startIndex)}
+                                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 shrink-0 border ${
+                                            isActive
+                                                ? 'bg-orange-600 text-white border-orange-500 shadow-md shadow-orange-600/30'
+                                                : 'bg-[#180d0d] border-white/10 text-gray-300 hover:text-white hover:border-white/20'
+                                        }`}
+                                    >
+                                        <span className="truncate">{sec.name}</span>
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono ${
+                                            isActive ? 'bg-black/30 text-orange-200 font-bold' : 'bg-white/5 text-gray-400'
+                                        }`}>
+                                            {sec.answered}/{sec.total}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+
                     {currentQ ? (
                         <div className="bg-[#140b0b] border border-white/10 rounded-2xl p-5 sm:p-7 shadow-xl flex flex-col justify-between flex-1">
                             <div>
                                 {/* Question Metadata Bar */}
                                 <div className="flex flex-wrap items-center justify-between gap-2 pb-4 mb-4 border-b border-white/5 text-xs">
-                                    <div className="flex items-center space-x-2">
+                                    <div className="flex flex-wrap items-center gap-2">
                                         <span className="px-2.5 py-1 rounded-lg bg-orange-600 text-white font-black text-xs">
                                             Q {currentQ.position} / {summary.total}
                                         </span>
-                                        <span className="text-gray-300 font-semibold">{currentQ.subject_name}</span>
-                                        <span className="text-gray-500">• {currentQ.topic_name}</span>
+                                        <span className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-orange-400 font-bold text-xs">
+                                            {currentQ.subject_name} • {relativeQuestionNumber} of {sectionTotalQuestions}
+                                        </span>
+                                        <span className="text-gray-400 font-medium">({currentQ.topic_name})</span>
                                     </div>
 
                                     <div className="flex items-center space-x-2">
@@ -675,30 +856,52 @@ export default function ExamPage() {
                                 </div>
                             </div>
 
-                            {/* 75-Cell Grid */}
-                            <div className="grid grid-cols-5 gap-2 max-h-[50vh] overflow-y-auto pr-1">
-                                {questions.map((q, idx) => {
-                                    const isAnswered = Boolean(answers[q.question_id]);
-                                    const isMarked = Boolean(marks[q.question_id]);
-                                    const isCurrent = idx === currentIndex;
-
-                                    let cellStyle = 'bg-[#180d0d] border-white/10 text-gray-400 hover:border-white/30';
-                                    if (isMarked) {
-                                        cellStyle = 'bg-purple-600/20 border-purple-500 text-purple-300 font-bold';
-                                    } else if (isAnswered) {
-                                        cellStyle = 'bg-green-600/20 border-green-500 text-green-400 font-bold';
-                                    }
+                            {/* Section-Grouped Question Grid */}
+                            <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-1">
+                                {sections.map((sec) => {
+                                    const secAnsCount = sec.questions.filter((q) => answers[q.question_id]).length;
+                                    const isCurrentSec = currentSection?.name === sec.name;
 
                                     return (
-                                        <button
-                                            key={q.question_id || idx}
-                                            onClick={() => setCurrentIndex(idx)}
-                                            className={`h-9 rounded-lg border text-xs flex items-center justify-center font-mono transition ${cellStyle} ${
-                                                isCurrent ? 'ring-2 ring-orange-500 ring-offset-2 ring-offset-[#140b0b] !border-orange-500 !text-white' : ''
-                                            }`}
-                                        >
-                                            {q.position || idx + 1}
-                                        </button>
+                                        <div key={sec.name} className="space-y-2">
+                                            <div className="flex items-center justify-between text-[11px] font-bold pb-1 border-b border-white/5">
+                                                <span className={`${isCurrentSec ? 'text-orange-400' : 'text-gray-400'} flex items-center space-x-1.5`}>
+                                                    {isCurrentSec && <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />}
+                                                    <span>{sec.name}</span>
+                                                </span>
+                                                <span className="text-[10px] font-mono text-gray-500">
+                                                    {secAnsCount} / {sec.questions.length}
+                                                </span>
+                                            </div>
+
+                                            <div className="grid grid-cols-5 gap-2">
+                                                {sec.questions.map((q) => {
+                                                    const idx = q.originalIndex;
+                                                    const isAnswered = Boolean(answers[q.question_id]);
+                                                    const isMarked = Boolean(marks[q.question_id]);
+                                                    const isCurrent = idx === currentIndex;
+
+                                                    let cellStyle = 'bg-[#180d0d] border-white/10 text-gray-400 hover:border-white/30';
+                                                    if (isMarked) {
+                                                        cellStyle = 'bg-purple-600/20 border-purple-500 text-purple-300 font-bold';
+                                                    } else if (isAnswered) {
+                                                        cellStyle = 'bg-green-600/20 border-green-500 text-green-400 font-bold';
+                                                    }
+
+                                                    return (
+                                                        <button
+                                                            key={q.question_id || idx}
+                                                            onClick={() => setCurrentIndex(idx)}
+                                                            className={`h-9 rounded-lg border text-xs flex items-center justify-center font-mono transition ${cellStyle} ${
+                                                                isCurrent ? 'ring-2 ring-orange-500 ring-offset-2 ring-offset-[#140b0b] !border-orange-500 !text-white' : ''
+                                                            }`}
+                                                        >
+                                                            {q.position || idx + 1}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
                                     );
                                 })}
                             </div>
@@ -739,33 +942,55 @@ export default function ExamPage() {
                             </button>
                         </div>
 
-                        {/* Mobile Grid */}
-                        <div className="grid grid-cols-5 gap-2 overflow-y-auto py-4">
-                            {questions.map((q, idx) => {
-                                const isAnswered = Boolean(answers[q.question_id]);
-                                const isMarked = Boolean(marks[q.question_id]);
-                                const isCurrent = idx === currentIndex;
-
-                                let cellStyle = 'bg-[#180d0d] border-white/10 text-gray-400';
-                                if (isMarked) {
-                                    cellStyle = 'bg-purple-600/20 border-purple-500 text-purple-300 font-bold';
-                                } else if (isAnswered) {
-                                    cellStyle = 'bg-green-600/20 border-green-500 text-green-400 font-bold';
-                                }
+                        {/* Mobile Section-Grouped Grid */}
+                        <div className="space-y-4 overflow-y-auto py-4">
+                            {sections.map((sec) => {
+                                const secAnsCount = sec.questions.filter((q) => answers[q.question_id]).length;
+                                const isCurrentSec = currentSection?.name === sec.name;
 
                                 return (
-                                    <button
-                                        key={q.question_id || idx}
-                                        onClick={() => {
-                                            setCurrentIndex(idx);
-                                            setShowMobileDrawer(false);
-                                        }}
-                                        className={`h-10 rounded-lg border text-xs flex items-center justify-center font-mono ${cellStyle} ${
-                                            isCurrent ? 'ring-2 ring-orange-500 ring-offset-2 ring-offset-[#140b0b] !border-orange-500 !text-white' : ''
-                                        }`}
-                                    >
-                                        {q.position || idx + 1}
-                                    </button>
+                                    <div key={sec.name} className="space-y-2">
+                                        <div className="flex items-center justify-between text-[11px] font-bold pb-1 border-b border-white/5">
+                                            <span className={`${isCurrentSec ? 'text-orange-400' : 'text-gray-400'} flex items-center space-x-1.5`}>
+                                                {isCurrentSec && <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />}
+                                                <span>{sec.name}</span>
+                                            </span>
+                                            <span className="text-[10px] font-mono text-gray-500">
+                                                {secAnsCount} / {sec.questions.length}
+                                            </span>
+                                        </div>
+
+                                        <div className="grid grid-cols-5 gap-2">
+                                            {sec.questions.map((q) => {
+                                                const idx = q.originalIndex;
+                                                const isAnswered = Boolean(answers[q.question_id]);
+                                                const isMarked = Boolean(marks[q.question_id]);
+                                                const isCurrent = idx === currentIndex;
+
+                                                let cellStyle = 'bg-[#180d0d] border-white/10 text-gray-400';
+                                                if (isMarked) {
+                                                    cellStyle = 'bg-purple-600/20 border-purple-500 text-purple-300 font-bold';
+                                                } else if (isAnswered) {
+                                                    cellStyle = 'bg-green-600/20 border-green-500 text-green-400 font-bold';
+                                                }
+
+                                                return (
+                                                    <button
+                                                        key={q.question_id || idx}
+                                                        onClick={() => {
+                                                            setCurrentIndex(idx);
+                                                            setShowMobileDrawer(false);
+                                                        }}
+                                                        className={`h-10 rounded-lg border text-xs flex items-center justify-center font-mono ${cellStyle} ${
+                                                            isCurrent ? 'ring-2 ring-orange-500 ring-offset-2 ring-offset-[#140b0b] !border-orange-500 !text-white' : ''
+                                                        }`}
+                                                    >
+                                                        {q.position || idx + 1}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
                                 );
                             })}
                         </div>
@@ -801,6 +1026,28 @@ export default function ExamPage() {
                                 <div className="text-xl font-black text-gray-300 mt-1">{summary.unanswered}</div>
                             </div>
                         </div>
+
+                        {/* Section-wise Breakdown */}
+                        {sectionMetrics.length > 0 && (
+                            <div className="bg-[#180d0d] border border-white/10 rounded-xl p-3 space-y-2">
+                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                                    Section Summary
+                                </div>
+                                <div className="space-y-1.5 text-xs">
+                                    {sectionMetrics.map((sec) => (
+                                        <div key={sec.name} className="flex items-center justify-between text-gray-300">
+                                            <span>{sec.name}</span>
+                                            <span className="font-mono text-[11px]">
+                                                <span className={sec.answered === sec.total ? 'text-green-400 font-bold' : 'text-orange-400 font-bold'}>
+                                                    {sec.answered}
+                                                </span>
+                                                <span className="text-gray-500"> / {sec.total}</span>
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         {error && (
                             <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs">

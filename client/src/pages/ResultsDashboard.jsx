@@ -304,7 +304,10 @@ export default function ResultsDashboard() {
                                 <th className="py-3 px-4 font-bold">Candidate</th>
                                 <th className="py-3 px-4 font-bold">Branch - Sec</th>
                                 <th className="py-3 px-4 font-bold">Shift</th>
-                                <th className="py-3 px-4 font-bold text-center">Score / 75</th>
+                                <th className="py-3 px-4 font-bold text-center">Score</th>
+                                <th className="py-3 px-4 font-bold text-center">Percentage</th>
+                                <th className="py-3 px-4 font-bold text-center">Grade</th>
+                                <th className="py-3 px-4 font-bold text-center">Status</th>
                                 <th className="py-3 px-4 font-bold text-center">Accuracy Breakdown</th>
                                 <th className="py-3 px-4 font-bold text-center">Time Taken</th>
                                 <th className="py-3 px-4 font-bold text-center">Cloud Sync</th>
@@ -354,14 +357,34 @@ export default function ResultsDashboard() {
                                         {/* Score */}
                                         <td className="py-3 px-4 text-center">
                                             <div className="font-black text-white text-sm">
-                                                {r.score} <span className="text-gray-500 text-xs font-normal">/ 75</span>
+                                                {r.score} <span className="text-gray-500 text-xs font-normal">/ {r.total_marks ?? r.total_questions}</span>
                                             </div>
                                             <div className="w-16 h-1.5 bg-white/10 rounded-full mx-auto mt-1 overflow-hidden">
                                                 <div
                                                     className="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full"
-                                                    style={{ width: `${Math.min(100, Math.max(0, (r.score / 75) * 100))}%` }}
+                                                    style={{ width: `${Math.min(100, Math.max(0, (r.score / Number(r.total_marks || r.total_questions || 1)) * 100))}%` }}
                                                 />
                                             </div>
+                                        </td>
+                                        
+                                        <td className="py-3 px-4 text-center font-mono font-bold text-gray-300">
+                                            {r.percentage ? `${r.percentage}%` : '--'}
+                                        </td>
+                                        
+                                        <td className="py-3 px-4 text-center font-black text-white text-lg">
+                                            {r.grade || '-'}
+                                        </td>
+                                        
+                                        <td className="py-3 px-4 text-center">
+                                            {r.pass_fail ? (
+                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                                    r.pass_fail.toLowerCase() === 'pass' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                                                }`}>
+                                                    {r.pass_fail}
+                                                </span>
+                                            ) : (
+                                                <span className="text-gray-500">-</span>
+                                            )}
                                         </td>
 
                                         {/* Accuracy breakdown chips */}
@@ -467,7 +490,7 @@ export default function ResultsDashboard() {
                                     <span>• Shift: {candidateDetail?.candidate?.shift_name}</span>
                                     <span>• Time: {formatTime(candidateDetail?.candidate?.time_taken_sec)}</span>
                                     <span>
-                                        • Final Score: <strong className="text-white font-bold">{candidateDetail?.candidate?.score} / 75</strong>
+                                        • Final Score: <strong className="text-white font-bold">{candidateDetail?.candidate?.score} / {candidateDetail?.candidate?.total_marks || candidateDetail?.candidate?.total_questions || '—'}</strong>
                                     </span>
                                 </div>
                             </div>
@@ -531,11 +554,11 @@ export default function ResultsDashboard() {
                                                         </span>
                                                     ) : isCorrect ? (
                                                         <span className="px-2 py-0.5 rounded bg-green-500/20 text-green-400 text-[10px] font-bold">
-                                                            ✓ Correct (+1)
+                                                            ✓ Correct (+{q.marks ?? 1})
                                                         </span>
                                                     ) : (
                                                         <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-400 text-[10px] font-bold">
-                                                            ✗ Wrong (0)
+                                                            ✗ Wrong ({Number(q.negative_marks || 0) > 0 ? `-${q.negative_marks}` : '0'})
                                                         </span>
                                                     )}
                                                 </div>

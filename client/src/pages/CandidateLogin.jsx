@@ -26,6 +26,13 @@ export default function CandidateLogin() {
         setLoading(true);
         setError(null);
 
+        // Enter fullscreen immediately during user gesture
+        try {
+            if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            }
+        } catch (_) {}
+
         try {
             const response = await fetch(`${API_URL}/exam/join`, {
                 method: 'POST',
@@ -38,6 +45,9 @@ export default function CandidateLogin() {
             const data = await response.json();
 
             if (!response.ok) {
+                if (document.fullscreenElement) {
+                    document.exitFullscreen().catch(() => {});
+                }
                 throw new Error(data.error || 'Failed to join exam.');
             }
 

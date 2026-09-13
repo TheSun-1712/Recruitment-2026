@@ -10,7 +10,6 @@ export default function QuestionBank() {
     const [counts, setCounts] = useState([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
-    const [loading, setLoading] = useState(true);
 
     // Filters
     const [selectedSubjectId, setSelectedSubjectId] = useState('');
@@ -32,6 +31,8 @@ export default function QuestionBank() {
         option_d: '',
         correct_opt: 'a',
         explanation: '',
+        marks: '1',
+        negative_marks: '0',
     });
     const [imageFile, setImageFile] = useState(null);
     const [imagePreview, setImagePreview] = useState(null);
@@ -71,7 +72,6 @@ export default function QuestionBank() {
 
     // Load Questions with filters
     const loadQuestions = useCallback(async () => {
-        setLoading(true);
         setError('');
         try {
             const params = new URLSearchParams({
@@ -88,8 +88,6 @@ export default function QuestionBank() {
             setTotal(data.pagination?.total || 0);
         } catch (err) {
             setError(err.message);
-        } finally {
-            setLoading(false);
         }
     }, [page, selectedSubjectId, selectedTopicId, selectedDifficulty, searchQuery]);
 
@@ -157,6 +155,8 @@ export default function QuestionBank() {
             option_d: '',
             correct_opt: 'a',
             explanation: '',
+            marks: '1',
+            negative_marks: '0',
         });
         setImageFile(null);
         setImagePreview(null);
@@ -181,6 +181,8 @@ export default function QuestionBank() {
             opt_d_image_url: q.opt_d_image_url || '',
             correct_opt: q.correct_opt || 'a',
             explanation: q.explanation || '',
+            marks: q.marks?.toString() || '1',
+            negative_marks: q.negative_marks?.toString() || '0',
         });
         setImageFile(null);
         setImagePreview(q.image_url ? (q.image_url.startsWith('http') ? q.image_url : `${API_URL}${q.image_url}`) : null);
@@ -202,6 +204,8 @@ export default function QuestionBank() {
             form.append('option_c', formData.option_c);
             form.append('option_d', formData.option_d);
             form.append('correct_opt', formData.correct_opt);
+            form.append('marks', formData.marks);
+            form.append('negative_marks', formData.negative_marks);
             if (formData.explanation) form.append('explanation', formData.explanation);
             if (imageFile) form.append('image', imageFile);
 
@@ -262,6 +266,46 @@ export default function QuestionBank() {
             await loadCounts();
         } catch (err) {
             setError(err.message);
+        }
+    }
+
+    async function handleAddSubject() {
+        const name = window.prompt('Subject name');
+        if (!name?.trim()) return;
+        try {
+            const res = await adminFetch('/admin/subjects', {
+                method: 'POST',
+                body: JSON.stringify({ name: name.trim() }),
+            });
+            const subject = res.subject;
+            setSubjects((current) => [...current, subject]);
+            setFormData((current) => ({ ...current, subject_id: String(subject.id), topic_id: '' }));
+            setMsg(`Subject '${subject.name}' added. Add a topic before saving the question.`);
+        } catch (err) {
+            setError(err.message || 'Unable to add subject');
+        }
+    }
+
+    async function handleAddTopic() {
+        if (!formData.subject_id) {
+            setError('Select or add a subject before adding a topic.');
+            return;
+        }
+        const name = window.prompt('Topic name');
+        if (!name?.trim()) return;
+        try {
+            const res = await adminFetch(`/admin/subjects/${formData.subject_id}/topics`, {
+                method: 'POST',
+                body: JSON.stringify({ name: name.trim() }),
+            });
+            const topic = res.topic;
+            setSubjects((current) => current.map((subject) => subject.id === Number(formData.subject_id)
+                ? { ...subject, topics: [...(subject.topics || []), topic] }
+                : subject));
+            setFormData((current) => ({ ...current, topic_id: String(topic.id) }));
+            setMsg(`Topic '${topic.name}' added.`);
+        } catch (err) {
+            setError(err.message || 'Unable to add topic');
         }
     }
 
@@ -440,6 +484,7 @@ export default function QuestionBank() {
                                 <th className="px-4 py-3">Question Preview</th>
                                 <th className="px-4 py-3">Topic / Subject</th>
                                 <th className="px-4 py-3">Difficulty</th>
+                                <th className="px-4 py-3">Marks</th>
                                 <th className="px-4 py-3">Ans</th>
                                 <th className="px-4 py-3">Image</th>
                                 <th className="px-4 py-3 text-right">Actions</th>
@@ -448,7 +493,7 @@ export default function QuestionBank() {
                         <tbody className="divide-y divide-white/5">
                             {questions.length === 0 ? (
                                 <tr>
-                                    <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
+                                    <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
                                         No questions found matching the selected filters.
                                     </td>
                                 </tr>
@@ -478,13 +523,16 @@ export default function QuestionBank() {
                                                 {q.difficulty}
                                             </span>
                                         </td>
+                                        <td className="px-4 py-3 text-gray-200 whitespace-nowrap">
+                                            +{q.marks ?? 1}{Number(q.negative_marks || 0) > 0 ? ` / -${q.negative_marks}` : ''}
+                                        </td>
                                         <td className="px-4 py-3">
                                             <span className="w-5 h-5 rounded-full bg-orange-600/30 border border-orange-500/50 text-orange-300 flex items-center justify-center font-bold uppercase text-[11px]">
                                                 {q.correct_opt}
                                             </span>
                                         </td>
                                         <td className="px-4 py-3">
-                                            {q.image_url || q.opt_a_image_url || q.opt_b_image_url || q.opt_c_image_url || q.opt_d_image_url ? (
+                                            {q.image_url ? (
                                                 <span className="material-symbols-outlined text-green-400 text-[18px]">image</span>
                                             ) : (
                                                 <span className="text-gray-600">—</span>
@@ -564,7 +612,7 @@ export default function QuestionBank() {
                             <div className="lg:w-1/2 p-6 border-b lg:border-b-0 lg:border-r border-white/10 space-y-4 overflow-y-auto">
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
-                                        <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Subject</label>
+                                        <div className="flex items-center justify-between mb-1"><label className="block text-[10px] font-bold uppercase text-gray-400">Subject</label><button type="button" onClick={handleAddSubject} className="text-[10px] font-bold text-orange-400 hover:text-orange-300">+ Add subject</button></div>
                                         <select
                                             required
                                             value={formData.subject_id}
@@ -586,15 +634,15 @@ export default function QuestionBank() {
                                     </div>
 
                                     <div>
-                                        <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Topic</label>
+                                        <div className="flex items-center justify-between mb-1"><label className="block text-[10px] font-bold uppercase text-gray-400">Topic</label><button type="button" onClick={handleAddTopic} className="text-[10px] font-bold text-orange-400 hover:text-orange-300">+ Add topic</button></div>
                                         <select
                                             required
                                             value={formData.topic_id}
                                             onChange={(e) => setFormData({ ...formData, topic_id: e.target.value })}
                                             className="w-full bg-black/50 border border-white/10 rounded-lg p-2 text-white text-xs focus:outline-none focus:border-orange-500"
                                         >
-                                            {modalTopics.map((t) => (
-                                                <option key={t.id} value={t.id}>{t.name}</option>
+                            {modalTopics.map((t) => (
+                                <option key={t.id} value={t.id}>{t.name} (ID: {t.id})</option>
                                             ))}
                                         </select>
                                     </div>
@@ -615,6 +663,11 @@ export default function QuestionBank() {
                                             <span>{diff}</span>
                                         </label>
                                     ))}
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div><label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Correct marks</label><input required min="0.01" step="0.01" type="number" value={formData.marks} onChange={(e) => setFormData({ ...formData, marks: e.target.value })} className="w-full bg-black/50 border border-white/10 rounded-lg p-2 text-white text-xs focus:outline-none focus:border-orange-500" /></div>
+                                    <div><label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Wrong-answer deduction</label><input required min="0" step="0.01" type="number" value={formData.negative_marks} onChange={(e) => setFormData({ ...formData, negative_marks: e.target.value })} className="w-full bg-black/50 border border-white/10 rounded-lg p-2 text-white text-xs focus:outline-none focus:border-orange-500" /><p className="text-[10px] text-gray-500 mt-1">Use 0 for no negative marking.</p></div>
                                 </div>
 
                                 <div>
@@ -804,11 +857,24 @@ export default function QuestionBank() {
                         </div>
 
                         <p className="text-xs text-gray-400 mb-3">
-                            Paste a JSON array of question objects matching the schema:
+                            Paste a JSON array of question objects matching the schema. Each question's <code>topic_id</code> must be one of the active exam topics below.
                         </p>
 
+                        <div className="mb-4 p-3 rounded-lg bg-orange-500/10 border border-orange-500/25 text-xs">
+                            <div className="font-bold text-orange-300 uppercase tracking-wide text-[10px] mb-1.5">Active exam topic IDs</div>
+                            {subjects.some((subject) => subject.topics?.length) ? (
+                                <div className="text-gray-200 leading-relaxed">
+                                    {subjects.flatMap((subject) => (subject.topics || []).map((topic) => (
+                                        <span key={topic.id} className="inline-block mr-2 mb-1 px-2 py-1 rounded bg-black/30"><b>#{topic.id}</b> {subject.name} → {topic.name}</span>
+                                    )))}
+                                </div>
+                            ) : (
+                                <div className="text-amber-200">No topics exist for the active exam. Add a subject and topic before importing.</div>
+                            )}
+                        </div>
+
                         <div className="bg-black/60 p-2.5 rounded-lg border border-white/5 font-mono text-[10px] text-gray-400 mb-4 overflow-x-auto">
-                            {`[ { "topic_id": 1, "difficulty": "easy", "body": "LaTeX $x$", "option_a": "A", "option_b": "B", "option_c": "C", "option_d": "D", "correct_opt": "a" } ]`}
+                            {`[ { "topic_id": 1, "difficulty": "easy", "marks": 2, "negative_marks": 0.5, "body": "LaTeX $x$", "option_a": "A", "option_b": "B", "option_c": "C", "option_d": "D", "correct_opt": "a" } ]`}
                         </div>
 
                         <form onSubmit={handleBulkImport} className="space-y-4">
@@ -822,8 +888,10 @@ export default function QuestionBank() {
                             />
 
                             {bulkStatus && (
-                                <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg text-xs text-green-300">
-                                    Successfully imported {bulkStatus.importedCount} questions!
+                                <div className={`p-3 border rounded-lg text-xs ${bulkStatus.failedCount ? 'bg-amber-500/10 border-amber-500/30 text-amber-200' : 'bg-green-500/10 border-green-500/30 text-green-300'}`}>
+                                    Imported {bulkStatus.importedCount} of {bulkStatus.totalProcessed} questions.
+                                    {bulkStatus.failedCount > 0 && <div className="mt-2">Failed rows: {bulkStatus.failed.map((item) => `#${item.index + 1}: ${item.error}`).join(' · ')}</div>}
+                                    {bulkStatus.failedCount > 0 && bulkStatus.availableTopics?.length > 0 && <div className="mt-2 text-gray-300">Available topic IDs: {bulkStatus.availableTopics.map((topic) => `${topic.id} (${topic.subject_name} → ${topic.topic_name})`).join(', ')}</div>}
                                 </div>
                             )}
 

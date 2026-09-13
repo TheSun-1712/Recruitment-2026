@@ -22,16 +22,22 @@ import { useEffect, useState, useRef, useCallback } from "react";
 // ─── Configurable constants ────────────────────────────────────────────────────
 // Change MAX_VIOLATIONS to adjust how many proctoring violations are allowed
 // before the user is automatically disqualified and logged out.
-const MAX_VIOLATIONS = 100;
+const MAX_VIOLATIONS = 10;
 // ──────────────────────────────────────────────────────────────────────────────
 // --- Passive DevTools detection helpers (defined once outside the hook) ---
 
 /**
  * Heuristic A: When DevTools is docked, innerWidth/innerHeight shrinks but
  * outer dimensions stay the same. A delta > 160px is a reliable signal.
- * (Browser chrome itself is typically 40-80px.)
+ *
+ * IMPORTANT: ONLY evaluate when in fullscreen mode!
+ * In windowed mode (non-fullscreen), browser chrome (URL bar, tabs, OS taskbar)
+ * can easily produce a delta > 160px on standard college lab screens (1366x768).
  */
 function isDevToolsOpenBySize() {
+    if (!document.fullscreenElement) {
+        return false;
+    }
     const widthDelta = window.outerWidth - window.innerWidth;
     const heightDelta = window.outerHeight - window.innerHeight;
     return widthDelta > 160 || heightDelta > 160;
@@ -72,8 +78,10 @@ export default function useContestProctoring(contestPrefix, { contestEnded = fal
     const DEVTOOLS_RELOAD_FLAG = `${contestPrefix}_devtools_reload`;
 
     const [showWarning, setShowWarning] = useState(false);
+    const [warningTitle, setWarningTitle] = useState("");
     const [warningMessage, setWarningMessage] = useState("");
     const [warningButtonText, setWarningButtonText] = useState("");
+    const [isViolation, setIsViolation] = useState(true);
     const warningActionRef = useRef(null);
     const [violationCount, setViolationCount] = useState(() => {
         return parseInt(sessionStorage.getItem(STORAGE_KEY) || "0", 10);
@@ -134,14 +142,19 @@ export default function useContestProctoring(contestPrefix, { contestEnded = fal
             }
         } catch (_) { /* non-critical */ }
 
+        setWarningTitle("🚨 Disqualified");
         setWarningMessage(
             "You have been disqualified for repeated violations. This incident has been recorded and reported to the admin."
         );
-        setWarningButtonText("Exit Contest");
+        setWarningButtonText("Exit Exam");
         warningActionRef.current = () => {
             onDisqualify?.(); // contest page clears tokens + navigates away
         };
+        setIsViolation(false);
         setShowWarning(true);
+
+        // Immediately trigger onDisqualify so consumer component can transition state to terminated screen
+        onDisqualify?.();
     }, [onDisqualify, contestPrefix]);
 
     /**
@@ -185,7 +198,9 @@ export default function useContestProctoring(contestPrefix, { contestEnded = fal
         }
 
         isShowingWarningRef.current = true;
+        setWarningTitle("⚠ Proctoring Violation");
         setWarningMessage(message);
+        setIsViolation(true);
         setWarningButtonText(buttonText);
         warningActionRef.current = action;
         setShowWarning(true);
@@ -221,10 +236,10 @@ export default function useContestProctoring(contestPrefix, { contestEnded = fal
         const handleFullscreenChange = () => {
             if (contestEndedRef.current) return;
             if (!document.fullscreenElement) {
-                // User exited fullscreen
+                // User exited fullscreen -> counts as a violation!
                 showOverlay(
-                    "You have exited fullscreen mode. Excessive violations may result in penalties.",
-                    "Return to Fullscreen",
+                    "You have exited full screen mode. Full screen is mandatory during the examination. Exceeding 10 violations will terminate your exam.",
+                    "Return to Full Screen",
                     () => {
                         document.documentElement.requestFullscreen().catch(() => { });
                     }
@@ -234,26 +249,31 @@ export default function useContestProctoring(contestPrefix, { contestEnded = fal
 
         document.addEventListener("fullscreenchange", handleFullscreenChange);
 
-        // On mount: if not already fullscreen, show the overlay
-        // (handles page reload where requestFullscreen can't be called without gesture)
-        //
+        // Attempt automatic fullscreen on mount
+        if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+            document.documentElement.requestFullscreen().catch(() => { });
+        }
+
+        // On mount: if not already fullscreen, show a non-penalizing overlay asking to enter full screen
         // IMPORTANT: Skip if the reload was triggered by DevTools detection.
-        // Effect 3a shows the DevTools warning at 200ms and its action callback
-        // re-enters fullscreen — so showing this overlay too would create a double-overlay.
         const wasDevToolsReload = sessionStorage.getItem(DEVTOOLS_RELOAD_FLAG) === 'true';
         if (!document.fullscreenElement && !wasDevToolsReload) {
-            // Small delay to let React render settle
             const timer = setTimeout(() => {
-                if (!document.fullscreenElement && !contestEndedRef.current) {
-                    showOverlay(
-                        "You must be in fullscreen mode during the contest. Click the button below to enter fullscreen.",
-                        "Enter Fullscreen",
-                        () => {
+                if (!document.fullscreenElement && !contestEndedRef.current && !isShowingWarningRef.current) {
+                    // Do NOT penalize on initial entry (do not increment violation count)
+                    isShowingWarningRef.current = true;
+                    setWarningMessage(
+                        "You must be in full screen mode during the examination. Click the button below to enter full screen."
+                    );
+                    setWarningButtonText("Enter Full Screen");
+                    warningActionRef.current = () => {
+                        if (document.documentElement.requestFullscreen) {
                             document.documentElement.requestFullscreen().catch(() => { });
                         }
-                    );
+                    };
+                    setShowWarning(true);
                 }
-            }, 500);
+            }, 600);
             return () => {
                 clearTimeout(timer);
                 document.removeEventListener("fullscreenchange", handleFullscreenChange);
@@ -418,10 +438,13 @@ export default function useContestProctoring(contestPrefix, { contestEnded = fal
 
     return {
         showWarning,
+        warningTitle,
         warningMessage,
         warningButtonText,
         warningAction,
         violationCount,
+        maxViolations: MAX_VIOLATIONS,
+        isViolation,
         cleanupProctoring,
     };
 }

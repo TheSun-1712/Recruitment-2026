@@ -4,6 +4,16 @@ const jwt = require('jsonwebtoken');
 const pool = require('../db');
 const { authenticateToken } = require('../middleware/authMiddleware');
 
+// Helper: Section ordering for exam sections (1: Math, 2: Aptitude, 3: English, 4: C Programming)
+const getSectionOrder = (subjectName) => {
+    const s = (subjectName || '').toLowerCase().trim();
+    if (s.includes('math')) return 1;
+    if (s.includes('aptitude')) return 2;
+    if (s.includes('english')) return 3;
+    if (s.includes('c prog') || s === 'c' || s.includes('programming')) return 4;
+    return 99;
+};
+
 // ============================================================
 // PUBLIC ROUTE: POST /exam/join
 // Joins an exam session (initial join or resume on new device)
@@ -34,6 +44,8 @@ router.post('/join', async (req, res) => {
                 s.ended_at AS shift_ended_at,
                 s.extra_time_min AS shift_extra_time_min,
                 s.paper_generated,
+                s.access_close_at,
+                s.duration_override_min,
                 ec.id AS exam_id,
                 ec.name AS exam_name,
                 ec.grace_join_min,
@@ -148,6 +160,7 @@ router.post('/join', async (req, res) => {
                     q.image_url,
                     q.difficulty,
                     t.name AS topic_name,
+                    s.id AS subject_id,
                     s.name AS subject_name,
                     cq.selected_opt,
                     cq.is_marked
@@ -199,8 +212,17 @@ router.post('/join', async (req, res) => {
         }
 
         // Case C: NEW SESSION INITIAL JOIN
-        // Check grace join window
-        if (candidate.shift_started_at) {
+        // Check hard access window (if defined), else fall back to grace join window
+        if (candidate.access_close_at) {
+            const closeAt = new Date(candidate.access_close_at);
+            if (now > closeAt) {
+                await client.query('ROLLBACK');
+                return res.status(403).json({
+                    error: `The access window for shift '${candidate.shift_name}' has closed. You cannot join now.`,
+                });
+            }
+        } else if (candidate.shift_started_at) {
+            // Fallback: legacy grace join window
             const startedAt = new Date(candidate.shift_started_at);
             const graceMinutes = candidate.grace_join_min || 15;
             const graceExpiry = new Date(startedAt.getTime() + graceMinutes * 60 * 1000);
@@ -225,12 +247,17 @@ router.post('/join', async (req, res) => {
         const weightageRes = await client.query(
             `SELECT 
                 wr.topic_id,
+                t.name AS topic_name,
+                s.id AS subject_id,
+                s.name AS subject_name,
                 wr.student_easy_count,
                 wr.student_medium_count,
                 wr.student_hard_count
              FROM weightage_rules wr
-             JOIN shifts s ON s.exam_id = wr.exam_id
-             WHERE s.id = $1
+             JOIN topics t ON t.id = wr.topic_id
+             JOIN subjects s ON s.id = t.subject_id
+             JOIN shifts sh ON sh.exam_id = wr.exam_id
+             WHERE sh.id = $1
              AND (wr.student_easy_count + wr.student_medium_count + wr.student_hard_count) > 0`,
             [candidate.shift_id]
         );
@@ -247,45 +274,83 @@ router.post('/join', async (req, res) => {
             });
         }
 
-        // If no student quotas configured, fall back to all shift questions
+        // If no student quotas configured, fall back to all shift questions grouped by section
         const assignedQuestionIds = [];
         if (weightageRes.rows.length === 0) {
             const fallback = await client.query(
-                'SELECT question_id FROM shift_questions WHERE shift_id = $1 ORDER BY RANDOM()',
+                `SELECT sq.question_id, s.name AS subject_name
+                 FROM shift_questions sq
+                 JOIN questions q ON q.id = sq.question_id
+                 JOIN topics t ON t.id = q.topic_id
+                 JOIN subjects s ON s.id = t.subject_id
+                 WHERE sq.shift_id = $1`,
                 [candidate.shift_id]
             );
-            assignedQuestionIds.push(...fallback.rows.map(r => r.question_id));
-        } else {
-            // Quota-driven selection: pick N questions per topic/difficulty bucket from shift pool
-            const diffs = ['easy', 'medium', 'hard'];
-            for (const rule of weightageRes.rows) {
-                for (const diff of diffs) {
-                    const quota = parseInt(rule[`student_${diff}_count`], 10) || 0;
-                    if (quota === 0) continue;
-                    const bucketRes = await client.query(
-                        `SELECT sq.question_id
-                         FROM shift_questions sq
-                         JOIN questions q ON q.id = sq.question_id
-                         WHERE sq.shift_id = $1
-                           AND q.topic_id = $2
-                           AND q.difficulty = $3
-                         ORDER BY RANDOM()
-                         LIMIT $4`,
-                        [candidate.shift_id, rule.topic_id, diff, quota]
-                    );
-                    if (bucketRes.rows.length < quota) {
-                        await client.query('ROLLBACK');
-                        return res.status(400).json({
-                            error: `Not enough questions in shift pool for topic_id=${rule.topic_id} difficulty=${diff}. Need ${quota}, found ${bucketRes.rows.length}.`,
-                        });
-                    }
-                    assignedQuestionIds.push(...bucketRes.rows.map(r => r.question_id));
-                }
+            const subjectMap = {};
+            for (const row of fallback.rows) {
+                const sub = row.subject_name || 'General';
+                if (!subjectMap[sub]) subjectMap[sub] = [];
+                subjectMap[sub].push(row.question_id);
             }
-            // Shuffle the final 30-question array so order is random
-            for (let i = assignedQuestionIds.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [assignedQuestionIds[i], assignedQuestionIds[j]] = [assignedQuestionIds[j], assignedQuestionIds[i]];
+            const sortedSubjects = Object.keys(subjectMap).sort((a, b) => getSectionOrder(a) - getSectionOrder(b));
+            for (const sub of sortedSubjects) {
+                const qIds = subjectMap[sub];
+                // Shuffle intra-section
+                for (let i = qIds.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [qIds[i], qIds[j]] = [qIds[j], qIds[i]];
+                }
+                assignedQuestionIds.push(...qIds);
+            }
+        } else {
+            // Group weightage rules by subject
+            const subjectGroups = {};
+            for (const rule of weightageRes.rows) {
+                const sub = rule.subject_name || 'General';
+                if (!subjectGroups[sub]) subjectGroups[sub] = [];
+                subjectGroups[sub].push(rule);
+            }
+
+            // Sort subjects in canonical section order: Mathematics -> Aptitude -> English -> C Programming
+            const sortedSubjects = Object.keys(subjectGroups).sort((a, b) => getSectionOrder(a) - getSectionOrder(b));
+            const diffs = ['easy', 'medium', 'hard'];
+
+            for (const sub of sortedSubjects) {
+                const rules = subjectGroups[sub];
+                const sectionQuestionIds = [];
+
+                for (const rule of rules) {
+                    for (const diff of diffs) {
+                        const quota = parseInt(rule[`student_${diff}_count`], 10) || 0;
+                        if (quota === 0) continue;
+                        const bucketRes = await client.query(
+                            `SELECT sq.question_id
+                             FROM shift_questions sq
+                             JOIN questions q ON q.id = sq.question_id
+                             WHERE sq.shift_id = $1
+                               AND q.topic_id = $2
+                               AND q.difficulty = $3
+                             ORDER BY RANDOM()
+                             LIMIT $4`,
+                            [candidate.shift_id, rule.topic_id, diff, quota]
+                        );
+                        if (bucketRes.rows.length < quota) {
+                            await client.query('ROLLBACK');
+                            return res.status(400).json({
+                                error: `Not enough questions in shift pool for topic '${rule.topic_name}' difficulty '${diff}'. Need ${quota}, found ${bucketRes.rows.length}.`,
+                            });
+                        }
+                        sectionQuestionIds.push(...bucketRes.rows.map(r => r.question_id));
+                    }
+                }
+
+                // Randomize questions STRICTLY within this section
+                for (let i = sectionQuestionIds.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [sectionQuestionIds[i], sectionQuestionIds[j]] = [sectionQuestionIds[j], sectionQuestionIds[i]];
+                }
+
+                assignedQuestionIds.push(...sectionQuestionIds);
             }
         }
 
@@ -299,8 +364,9 @@ router.post('/join', async (req, res) => {
             );
         }
 
-        // 4. Calculate session end time: duration (default 60) + shift extra time
-        const totalDurationMin = (candidate.total_duration_min || 60) + (candidate.shift_extra_time_min || 0);
+        // 4. Calculate session end time: duration (override or default) + shift extra time
+        const baseDuration = candidate.duration_override_min || candidate.total_duration_min || 60;
+        const totalDurationMin = baseDuration + (candidate.shift_extra_time_min || 0);
         const totalSec = totalDurationMin * 60;
         const endTime = new Date(now.getTime() + totalSec * 1000);
 
@@ -333,6 +399,7 @@ router.post('/join', async (req, res) => {
                 q.image_url,
                 q.difficulty,
                 t.name AS topic_name,
+                s.id AS subject_id,
                 s.name AS subject_name,
                 cq.selected_opt,
                 cq.is_marked
@@ -605,10 +672,12 @@ router.post('/submit', async (req, res) => {
         await client.query('BEGIN');
 
         const sessRes = await client.query(
-            `SELECT cs.*, s.name AS shift_name,
-                    s.is_paused AS shift_is_paused, s.paused_at AS shift_paused_at
+            `SELECT cs.*, s.name AS shift_name, s.exam_id,
+                    s.is_paused AS shift_is_paused, s.paused_at AS shift_paused_at,
+                    ec.pass_mark_pct, ec.grade_ranges
              FROM candidate_sessions cs
              JOIN shifts s ON s.id = cs.shift_id
+             JOIN exam_config ec ON ec.id = s.exam_id
              WHERE cs.candidate_id = $1 
              ORDER BY cs.id DESC LIMIT 1
              FOR UPDATE OF cs`,
@@ -651,13 +720,19 @@ router.post('/submit', async (req, res) => {
             return res.status(403).json({ error: 'Submission rejected: Exam time has expired.' });
         }
 
-        // Compute correct, wrong, skipped counts
+        // Compute correct, wrong, skipped counts and score with negative marking
         const evalRes = await client.query(
             `SELECT 
                 COUNT(cq.id) AS total_questions,
                 COUNT(cq.id) FILTER (WHERE cq.selected_opt = q.correct_opt) AS correct_count,
                 COUNT(cq.id) FILTER (WHERE cq.selected_opt IS NOT NULL AND cq.selected_opt != q.correct_opt) AS wrong_count,
-                COUNT(cq.id) FILTER (WHERE cq.selected_opt IS NULL) AS skipped_count
+                COUNT(cq.id) FILTER (WHERE cq.selected_opt IS NULL) AS skipped_count,
+                COALESCE(SUM(q.marks), 0) AS total_marks,
+                COALESCE(SUM(CASE
+                    WHEN cq.selected_opt = q.correct_opt THEN q.marks
+                    WHEN cq.selected_opt IS NOT NULL THEN -q.negative_marks
+                    ELSE 0
+                END), 0) AS score
              FROM candidate_questions cq
              JOIN questions q ON q.id = cq.question_id
              WHERE cq.candidate_id = $1`,
@@ -669,14 +744,31 @@ router.post('/submit', async (req, res) => {
         const correctCount = parseInt(counts.correct_count || 0, 10);
         const wrongCount = parseInt(counts.wrong_count || 0, 10);
         const skippedCount = parseInt(counts.skipped_count || 0, 10);
-        const score = correctCount; // No negative marking
+        const totalMarks = Number(counts.total_marks || 0);
+        const score = Number(counts.score || 0);
         const timeTakenSec = session.active_seconds || 0;
+
+        // Grading calculation
+        const percentage = totalMarks > 0 ? Math.max(0, (score / totalMarks) * 100).toFixed(2) : 0;
+        const passMarkPct = parseFloat(session.pass_mark_pct || 50);
+        const passFail = parseFloat(percentage) >= passMarkPct ? 'pass' : 'fail';
+
+        let grade = null;
+        if (session.grade_ranges && Array.isArray(session.grade_ranges)) {
+            const numPct = parseFloat(percentage);
+            for (const range of session.grade_ranges) {
+                if (numPct >= range.min && numPct <= range.max) {
+                    grade = range.label;
+                    break;
+                }
+            }
+        }
 
         // Insert into results (guarded by UNIQUE constraint on candidate_id, shift_id)
         const resultInsertRes = await client.query(
             `INSERT INTO results 
-                (candidate_id, shift_id, score, total_questions, correct_count, wrong_count, skipped_count, time_taken_sec, submitted_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                (candidate_id, shift_id, score, total_questions, total_marks, correct_count, wrong_count, skipped_count, time_taken_sec, submitted_at, percentage, pass_fail, grade)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
              ON CONFLICT (candidate_id, shift_id) DO NOTHING
              RETURNING *`,
             [
@@ -684,11 +776,15 @@ router.post('/submit', async (req, res) => {
                 session.shift_id,
                 score,
                 totalQuestions,
+                totalMarks,
                 correctCount,
                 wrongCount,
                 skippedCount,
                 timeTakenSec,
                 now,
+                percentage,
+                passFail,
+                grade,
             ]
         );
 
@@ -710,6 +806,7 @@ router.post('/submit', async (req, res) => {
             message: 'Exam submitted successfully.',
             score,
             total_questions: totalQuestions,
+            total_marks: totalMarks,
             correct_count: correctCount,
             wrong_count: wrongCount,
             skipped_count: skippedCount,
@@ -733,9 +830,11 @@ router.get('/status', async (req, res) => {
 
     try {
         const sessRes = await pool.query(
-            `SELECT cs.*, s.name AS shift_name, s.is_paused AS shift_is_paused, s.paused_at AS shift_paused_at, s.is_active AS shift_is_active
+            `SELECT cs.*, s.name AS shift_name, s.is_paused AS shift_is_paused, s.paused_at AS shift_paused_at, s.is_active AS shift_is_active,
+                    r.total_marks AS result_total_marks
              FROM candidate_sessions cs
              JOIN shifts s ON s.id = cs.shift_id
+             LEFT JOIN results r ON r.candidate_id = cs.candidate_id AND r.shift_id = cs.shift_id
              WHERE cs.candidate_id = $1
              ORDER BY cs.id DESC LIMIT 1`,
             [candidateId]
@@ -780,6 +879,7 @@ router.get('/status', async (req, res) => {
             isSubmitted: session.is_submitted,
             submittedAt: session.submitted_at,
             score: session.score,
+            totalMarks: session.result_total_marks,
             timeRemainingSec: remainingSec,
             endTime: session.end_time,
             isPaused: session.shift_is_paused,

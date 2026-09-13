@@ -539,7 +539,7 @@ export default function TokenManager() {
                                         <td className="py-3 px-4 text-center">
                                             {c.is_submitted ? (
                                                 <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 text-[10px] font-bold">
-                                                    Submitted ({c.score} / 75)
+                                                    Submitted ({c.score !== null ? c.score : '—'})
                                                 </span>
                                             ) : c.token_used ? (
                                                 <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-bold flex items-center justify-center space-x-1">

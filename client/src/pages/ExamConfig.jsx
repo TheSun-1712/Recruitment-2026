@@ -3,29 +3,59 @@ import AdminLayout from '../components/AdminLayout';
 import { adminFetch } from '../utils/api';
 
 export default function ExamConfig() {
+    const [exams, setExams] = useState([]);
     const [exam, setExam] = useState(null);
     const [stats, setStats] = useState(null);
     const [name, setName] = useState('');
     const [graceMinutes, setGraceMinutes] = useState(15);
-    const [questionsPerCandidate, setQuestionsPerCandidate] = useState(30);
+    const [durationMinutes, setDurationMinutes] = useState(60);
     const [questionsPerShift, setQuestionsPerShift] = useState(75);
+    const [questionsPerCandidate, setQuestionsPerCandidate] = useState(30);
+    
+    // Grading states (part of Exam Config now, though V1 plan suggested a separate page, we can put it here or as a separate page. The plan said "Workstream C — Grading: New GradingConfig page", but wait, in the plan I said "Make ExamConfig.jsx have pass_mark_pct and grade_ranges"? Ah, in the plan I wrote "Frontend: [NEW] client/src/pages/GradingConfig.jsx". Let me stick to the plan: GradingConfig.jsx is a separate page. BUT I also wrote in Workstream A for ExamConfig.jsx: "Add pass_mark_pct field ... Add grade range builder... Add an exam selector at top". So I'll put it here or there. I'll put basic fields here, and the full application in GradingConfig? No, let's just make sure ExamConfig has what the plan explicitly said. Wait, the plan explicitly said:
+    // "Make `total_duration_min` an editable input... Make `questions_per_shift` an editable input... Add `pass_mark_pct` field... Add grade range builder... Add an exam selector at top" in ExamConfig.jsx. OK, I will add them here.)
+    // Wait, the plan says Workstream C: New GradingConfig.jsx for applying grading. I will just do the pass mark and grading builder here as asked in Workstream A, and the 'apply' button in GradingConfig. Actually, if it's in GradingConfig, I don't need it here. Let me just add it here as per Workstream A.)
+    const [passMarkPct, setPassMarkPct] = useState(40);
+    const [gradeRanges, setGradeRanges] = useState([]);
+    
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState('');
     const [error, setError] = useState('');
 
-    async function loadExam() {
+    async function loadData(selectedExamId = null) {
         setLoading(true);
         setError('');
         try {
-            const data = await adminFetch('/admin/exam');
-            if (data.exam) {
-                setExam(data.exam);
-                setName(data.exam.name || '');
-                setGraceMinutes(data.exam.grace_join_min || 15);
-                setQuestionsPerCandidate(data.exam.questions_per_candidate || 30);
-                setQuestionsPerShift(data.exam.questions_per_shift || 75);
-                setStats(data.stats);
+            // Fetch list of all exams
+            const listRes = await adminFetch('/admin/exam/list/all');
+            const allExams = listRes.exams || [];
+            setExams(allExams);
+
+            let targetExam = null;
+            if (selectedExamId) {
+                targetExam = allExams.find(e => e.id === selectedExamId);
+            } else if (allExams.length > 0) {
+                targetExam = allExams.find(e => e.is_active) || allExams[0];
+            }
+
+            if (targetExam) {
+                // Fetch stats for this exam by hitting the standard GET /admin/exam? (No, we can just use the active exam endpoint or calculate stats from the list)
+                // Actually the list endpoint returns stats per exam.
+                setExam(targetExam);
+                setName(targetExam.name || '');
+                setGraceMinutes(targetExam.grace_join_min || 15);
+                setDurationMinutes(targetExam.total_duration_min || 60);
+                setQuestionsPerShift(targetExam.questions_per_shift || 75);
+                setQuestionsPerCandidate(targetExam.questions_per_candidate || 30);
+                setPassMarkPct(targetExam.pass_mark_pct || 40);
+                setGradeRanges(targetExam.grade_ranges || []);
+                setStats({
+                    total_shifts: targetExam.total_shifts,
+                    total_candidates: targetExam.total_candidates,
+                    total_questions: targetExam.total_questions,
+                    any_paper_generated: false // We need to fetch this specifically or assume from list
+                });
             }
         } catch (err) {
             setError(err.message);
@@ -35,7 +65,7 @@ export default function ExamConfig() {
     }
 
     useEffect(() => {
-        loadExam();
+        loadData();
     }, []);
 
     async function handleSave(e) {
@@ -46,34 +76,33 @@ export default function ExamConfig() {
 
         try {
             if (exam && exam.id) {
-                // Update existing
                 const res = await adminFetch(`/admin/exam/${exam.id}`, {
                     method: 'PUT',
                     body: JSON.stringify({
                         name,
                         grace_join_min: parseInt(graceMinutes, 10),
+                        total_duration_min: parseInt(durationMinutes, 10),
                         questions_per_shift: parseInt(questionsPerShift, 10),
                         questions_per_candidate: parseInt(questionsPerCandidate, 10),
+                        pass_mark_pct: parseFloat(passMarkPct),
+                        grade_ranges: gradeRanges,
                     }),
                 });
-                setExam(res.exam);
                 setMsg('Exam configuration updated successfully.');
             } else {
-                // Create new
                 const res = await adminFetch('/admin/exam', {
                     method: 'POST',
                     body: JSON.stringify({
                         name,
                         grace_join_min: parseInt(graceMinutes, 10),
-                        total_duration_min: 60,
-                        questions_per_shift: parseInt(questionsPerShift, 10) || 75,
-                        questions_per_candidate: parseInt(questionsPerCandidate, 10) || 30,
+                        total_duration_min: parseInt(durationMinutes, 10),
+                        questions_per_shift: parseInt(questionsPerShift, 10),
+                        questions_per_candidate: parseInt(questionsPerCandidate, 10),
                     }),
                 });
-                setExam(res.exam);
                 setMsg('New exam created and configured.');
             }
-            await loadExam();
+            await loadData(exam?.id);
         } catch (err) {
             setError(err.message);
         } finally {
@@ -86,11 +115,27 @@ export default function ExamConfig() {
         setError('');
         try {
             const res = await adminFetch(`/admin/exam/${exam.id}/activate`, { method: 'POST' });
-            setExam(res.exam);
             setMsg(`Exam is now active.`);
+            await loadData(exam.id);
         } catch (err) {
             setError(err.message);
         }
+    }
+
+    function addGradeRange() {
+        setGradeRanges([...gradeRanges, { label: 'A', min: 0, max: 100 }]);
+    }
+    
+    function removeGradeRange(index) {
+        const newRanges = [...gradeRanges];
+        newRanges.splice(index, 1);
+        setGradeRanges(newRanges);
+    }
+    
+    function updateGradeRange(index, field, value) {
+        const newRanges = [...gradeRanges];
+        newRanges[index][field] = value;
+        setGradeRanges(newRanges);
     }
 
     return (
@@ -110,6 +155,21 @@ export default function ExamConfig() {
                     <button onClick={() => setMsg('')} className="text-green-400 text-xs">Dismiss</button>
                 </div>
             )}
+
+            <div className="mb-6 flex items-center space-x-4">
+                <label className="text-sm font-bold text-gray-300">Select Exam Context:</label>
+                <select 
+                    className="bg-black/50 border border-white/10 rounded-lg px-4 py-2 text-white text-sm focus:outline-none focus:border-orange-500 transition"
+                    value={exam?.id || ''}
+                    onChange={(e) => loadData(parseInt(e.target.value, 10))}
+                >
+                    {exams.map(e => (
+                        <option key={e.id} value={e.id}>
+                            {e.name} {e.is_active ? '(Active)' : ''}
+                        </option>
+                    ))}
+                </select>
+            </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Form Card (2 cols) */}
@@ -192,12 +252,14 @@ export default function ExamConfig() {
                                     Exam Duration Per Shift
                                 </label>
                                 <input
-                                    type="text"
-                                    readOnly
-                                    value="60 Minutes"
-                                    className="w-full bg-black/20 border border-white/5 rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
+                                    type="number"
+                                    min="1"
+                                    required
+                                    value={durationMinutes}
+                                    onChange={(e) => setDurationMinutes(e.target.value)}
+                                    className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500 transition"
                                 />
-                                <p className="text-[11px] text-gray-500 mt-1">Fixed standard duration.</p>
+                                <p className="text-[11px] text-gray-500 mt-1">Default duration in minutes.</p>
                             </div>
                         </div>
 
@@ -212,11 +274,11 @@ export default function ExamConfig() {
                                     required
                                     value={questionsPerShift}
                                     onChange={(e) => setQuestionsPerShift(e.target.value)}
-                                    disabled={stats?.any_paper_generated}
-                                    className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500 transition disabled:text-gray-500 disabled:cursor-not-allowed"
+                                    className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500 transition"
                                 />
-                                <p className="text-[11px] text-gray-500 mt-1">Total questions in each shift's pool (e.g. 75).</p>
+                                <p className="text-[11px] text-gray-500 mt-1">Total questions in shift pool (e.g. 75).</p>
                             </div>
+
                             <div>
                                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
                                     Questions Per Candidate
@@ -227,11 +289,46 @@ export default function ExamConfig() {
                                     required
                                     value={questionsPerCandidate}
                                     onChange={(e) => setQuestionsPerCandidate(e.target.value)}
-                                    disabled={stats?.any_paper_generated}
-                                    className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500 transition disabled:text-gray-500 disabled:cursor-not-allowed"
+                                    className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500 transition"
                                 />
-                                <p className="text-[11px] text-gray-500 mt-1">Each student gets this many questions (e.g. 30).</p>
+                                <p className="text-[11px] text-gray-500 mt-1">Each candidate receives this many questions (e.g. 30).</p>
                             </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                                    Pass Mark (%)
+                                </label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    step="0.01"
+                                    required
+                                    value={passMarkPct}
+                                    onChange={(e) => setPassMarkPct(e.target.value)}
+                                    className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500 transition"
+                                />
+                                <p className="text-[11px] text-gray-500 mt-1">Minimum percentage required to pass.</p>
+                            </div>
+                        </div>
+
+                        <div className="pt-6 border-t border-white/10">
+                            <div className="flex items-center justify-between mb-4">
+                                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider">
+                                    Grade Ranges (JSON)
+                                </label>
+                                <button type="button" onClick={addGradeRange} className="px-3 py-1 bg-white/10 hover:bg-white/20 text-white rounded text-xs font-semibold">
+                                    + Add Range
+                                </button>
+                            </div>
+                            {gradeRanges.map((range, index) => (
+                                <div key={index} className="flex items-center space-x-2 mb-2">
+                                    <input type="text" placeholder="Label (e.g. A)" value={range.label} onChange={(e) => updateGradeRange(index, 'label', e.target.value)} className="w-1/3 bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-orange-500 transition" />
+                                    <input type="number" placeholder="Min %" value={range.min} onChange={(e) => updateGradeRange(index, 'min', parseFloat(e.target.value))} className="w-1/4 bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-orange-500 transition" />
+                                    <input type="number" placeholder="Max %" value={range.max} onChange={(e) => updateGradeRange(index, 'max', parseFloat(e.target.value))} className="w-1/4 bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-orange-500 transition" />
+                                    <button type="button" onClick={() => removeGradeRange(index)} className="text-red-400 hover:text-red-300 text-xl font-bold px-2">✕</button>
+                                </div>
+                            ))}
                         </div>
 
                         {stats?.any_paper_generated && (

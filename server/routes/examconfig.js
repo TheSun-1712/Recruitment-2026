@@ -90,7 +90,7 @@ router.post('/', async (req, res) => {
 // PUT /admin/exam/:id - Update exam config (blocked if papers generated)
 router.put('/:id', async (req, res) => {
     const { id } = req.params;
-    const { name, total_duration_min, grace_join_min, questions_per_shift, questions_per_candidate } = req.body;
+    const { name, total_duration_min, grace_join_min, questions_per_shift, questions_per_candidate, pass_mark_pct, grade_ranges } = req.body;
 
     try {
         // Check if any shift for this exam already has papers generated
@@ -118,8 +118,10 @@ router.put('/:id', async (req, res) => {
                  total_duration_min = $2,
                  grace_join_min = $3,
                  questions_per_shift = $4,
-                 questions_per_candidate = $5
-             WHERE id = $6
+                 questions_per_candidate = $5,
+                 pass_mark_pct = $6,
+                 grade_ranges = $7
+             WHERE id = $8
              RETURNING *`,
             [
                 name !== undefined ? name.trim() : current.name,
@@ -127,6 +129,8 @@ router.put('/:id', async (req, res) => {
                 grace_join_min !== undefined ? parseInt(grace_join_min, 10) : current.grace_join_min,
                 questions_per_shift !== undefined ? parseInt(questions_per_shift, 10) : current.questions_per_shift,
                 questions_per_candidate !== undefined ? parseInt(questions_per_candidate, 10) : current.questions_per_candidate,
+                pass_mark_pct !== undefined ? parseFloat(pass_mark_pct) : current.pass_mark_pct,
+                grade_ranges !== undefined ? JSON.stringify(grade_ranges) : current.grade_ranges,
                 id,
             ]
         );
@@ -163,6 +167,29 @@ router.post('/:id/activate', async (req, res) => {
         res.status(500).json({ error: err.message });
     } finally {
         client.release();
+    }
+});
+
+// GET /admin/exams - List all exams
+router.get('/list/all', async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT 
+                e.*,
+                COUNT(DISTINCT s.id) AS total_shifts,
+                COUNT(DISTINCT c.id) AS total_candidates,
+                COUNT(DISTINCT q.id) AS total_questions
+             FROM exam_config e
+             LEFT JOIN shifts s ON s.exam_id = e.id
+             LEFT JOIN candidates c ON c.shift_id = s.id
+             LEFT JOIN questions q ON q.exam_id = e.id AND q.is_deleted = false
+             GROUP BY e.id
+             ORDER BY e.id DESC`
+        );
+        res.json({ exams: result.rows });
+    } catch (err) {
+        console.error('GET /admin/exams error:', err);
+        res.status(500).json({ error: err.message });
     }
 });
 
