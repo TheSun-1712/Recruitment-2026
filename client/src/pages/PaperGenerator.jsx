@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import AdminLayout from '../components/AdminLayout';
+import KaTeXRenderer from '../components/KaTeXRenderer';
 import { adminFetch } from '../utils/api';
 
 export default function PaperGenerator() {
@@ -20,7 +21,34 @@ export default function PaperGenerator() {
     const [confirmation, setConfirmation] = useState(null);
     const [deleteConfirmation, setDeleteConfirmation] = useState(null);
 
+    // Preview state
+    const [previewModal, setPreviewModal] = useState(null); // { shiftId, shiftName } or null
+    const [previewData, setPreviewData] = useState(null);
+    const [previewLoading, setPreviewLoading] = useState(false);
+    const [previewError, setPreviewError] = useState(null);
+    const [searchFilter, setSearchFilter] = useState('');
+    const [difficultyFilter, setDifficultyFilter] = useState('all');
+    const [subjectFilter, setSubjectFilter] = useState('all');
+
     useEffect(() => { loadInitialData(); }, []);
+
+    async function openShiftPreview(shiftId, shiftName) {
+        setPreviewModal({ shiftId, shiftName });
+        setPreviewLoading(true);
+        setPreviewError(null);
+        setPreviewData(null);
+        setSearchFilter('');
+        setDifficultyFilter('all');
+        setSubjectFilter('all');
+        try {
+            const data = await adminFetch(`/admin/shifts/${shiftId}/questions`);
+            setPreviewData(data);
+        } catch (err) {
+            setPreviewError(err.message || 'Failed to load questions for this shift');
+        } finally {
+            setPreviewLoading(false);
+        }
+    }
 
     async function loadInitialData() {
         setLoading(true);
@@ -136,6 +164,39 @@ export default function PaperGenerator() {
         return selectedShiftIds.filter((id) => shifts.find((s) => s.id === id)?.paper_generated);
     }, [selectedShiftIds, shifts]);
 
+    const filteredPreviewQuestions = useMemo(() => {
+        if (!previewData?.questions) return [];
+        return previewData.questions.filter((q) => {
+            if (difficultyFilter !== 'all' && q.difficulty?.toLowerCase() !== difficultyFilter.toLowerCase()) {
+                return false;
+            }
+            if (subjectFilter !== 'all' && q.subject_name !== subjectFilter) {
+                return false;
+            }
+            if (searchFilter.trim()) {
+                const term = searchFilter.toLowerCase().trim();
+                const bodyMatch = (q.body || '').toLowerCase().includes(term);
+                const topicMatch = (q.topic_name || '').toLowerCase().includes(term);
+                const subjectMatch = (q.subject_name || '').toLowerCase().includes(term);
+                const optMatch = [q.option_a, q.option_b, q.option_c, q.option_d].some((opt) => (opt || '').toLowerCase().includes(term));
+                const expMatch = (q.explanation || '').toLowerCase().includes(term);
+                if (!bodyMatch && !topicMatch && !subjectMatch && !optMatch && !expMatch) {
+                    return false;
+                }
+            }
+            return true;
+        });
+    }, [previewData, difficultyFilter, subjectFilter, searchFilter]);
+
+    const availableSubjects = useMemo(() => {
+        if (!previewData?.questions) return [];
+        const set = new Set();
+        previewData.questions.forEach((q) => {
+            if (q.subject_name) set.add(q.subject_name);
+        });
+        return Array.from(set);
+    }, [previewData]);
+
     const targetQuestions = Number(exam?.questions_per_shift || 75);
     const mismatch = weightageSummary.total !== targetQuestions;
     const hasShortfalls = (validation?.shortfalls?.length || 0) > 0;
@@ -236,11 +297,21 @@ export default function PaperGenerator() {
                     </div>
                     <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
                         {generatedResult.shifts?.map((shift) => (
-                            <div key={shift.shift_id} className="rounded-xl bg-black/20 p-3 text-xs">
-                                <b className="text-white">{shift.shift_name}</b>
-                                <div className="text-gray-300 mt-2">
-                                    {shift.question_count} questions · {shift.breakdown.easy} easy · {shift.breakdown.medium} medium · {shift.breakdown.hard} hard
+                            <div key={shift.shift_id} className="rounded-xl bg-black/20 p-3 text-xs flex flex-col justify-between">
+                                <div>
+                                    <b className="text-white text-sm">{shift.shift_name}</b>
+                                    <div className="text-gray-300 mt-1">
+                                        {shift.question_count} questions · {shift.breakdown.easy} easy · {shift.breakdown.medium} medium · {shift.breakdown.hard} hard
+                                    </div>
                                 </div>
+                                <button
+                                    type="button"
+                                    onClick={() => openShiftPreview(shift.shift_id, shift.shift_name)}
+                                    className="mt-3 w-full py-1.5 px-3 rounded-lg bg-orange-600/30 hover:bg-orange-600/50 border border-orange-500/40 text-orange-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition"
+                                >
+                                    <span className="material-symbols-outlined text-[15px]">visibility</span>
+                                    <span>Preview Questions</span>
+                                </button>
                             </div>
                         ))}
                     </div>
@@ -315,18 +386,32 @@ export default function PaperGenerator() {
                                         </span>
                                     </label>
                                     {shift.paper_generated && (
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setDeleteConfirmation({ type: 'single', shift });
-                                            }}
-                                            className="ml-3 px-2.5 py-1 text-xs text-red-400 hover:text-white hover:bg-red-500/20 border border-red-500/30 rounded-lg transition flex items-center gap-1 font-semibold"
-                                            title="Delete question paper for this shift to unlock exam configuration"
-                                        >
-                                            <span className="material-symbols-outlined text-[15px]">delete</span>
-                                            <span>Delete Paper</span>
-                                        </button>
+                                        <div className="flex items-center gap-2 ml-3">
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    openShiftPreview(shift.id, shift.name);
+                                                }}
+                                                className="px-2.5 py-1 text-xs text-orange-400 hover:text-white hover:bg-orange-500/20 border border-orange-500/30 rounded-lg transition flex items-center gap-1 font-semibold"
+                                                title="Preview questions generated for this shift"
+                                            >
+                                                <span className="material-symbols-outlined text-[15px]">visibility</span>
+                                                <span>Preview Paper</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setDeleteConfirmation({ type: 'single', shift });
+                                                }}
+                                                className="px-2.5 py-1 text-xs text-red-400 hover:text-white hover:bg-red-500/20 border border-red-500/30 rounded-lg transition flex items-center gap-1 font-semibold"
+                                                title="Delete question paper for this shift to unlock exam configuration"
+                                            >
+                                                <span className="material-symbols-outlined text-[15px]">delete</span>
+                                                <span>Delete Paper</span>
+                                            </button>
+                                        </div>
                                     )}
                                 </div>
                             ))}
@@ -405,6 +490,245 @@ export default function PaperGenerator() {
                     {generating ? 'Generating papers…' : `Generate papers for ${selectedShiftIds.length} selected shift${selectedShiftIds.length === 1 ? '' : 's'}`}
                 </button>
             </div>
+
+            {/* Question Paper Preview Modal */}
+            {previewModal && (
+                <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5">
+                    <div className="bg-[#120808] border border-white/15 rounded-2xl w-full max-w-5xl h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        {/* Modal Header */}
+                        <div className="p-4 sm:p-5 border-b border-white/10 bg-[#180d0d] flex items-center justify-between gap-4">
+                            <div>
+                                <div className="flex items-center gap-2">
+                                    <span className="material-symbols-outlined text-orange-400 text-xl">description</span>
+                                    <h3 className="text-base font-bold text-white">
+                                        Question Paper Preview — <span className="text-orange-400">{previewModal.shiftName}</span>
+                                    </h3>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
+                                    <span className="px-2.5 py-0.5 rounded-full bg-white/10 text-gray-200 font-semibold">
+                                        {previewData?.totalQuestions || 0} Questions
+                                    </span>
+                                    <span className="px-2.5 py-0.5 rounded-full bg-white/10 text-gray-200 font-semibold font-mono">
+                                        {previewData?.totalMarks || 0} Total Marks
+                                    </span>
+                                    {previewData?.breakdown && (
+                                        <>
+                                            <span className="px-2 py-0.5 rounded-full bg-green-500/15 text-green-300 border border-green-500/30 text-[11px] font-medium">
+                                                {previewData.breakdown.easy} Easy
+                                            </span>
+                                            <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[11px] font-medium">
+                                                {previewData.breakdown.medium} Medium
+                                            </span>
+                                            <span className="px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/30 text-[11px] font-medium">
+                                                {previewData.breakdown.hard} Hard
+                                            </span>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setPreviewModal(null)}
+                                className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/15 text-gray-400 hover:text-white flex items-center justify-center transition"
+                                title="Close preview"
+                            >
+                                <span className="material-symbols-outlined text-lg">close</span>
+                            </button>
+                        </div>
+
+                        {/* Toolbar: Search and Filter */}
+                        <div className="p-3 sm:px-5 sm:py-3 border-b border-white/10 bg-[#150a0a] flex flex-wrap items-center justify-between gap-3 text-xs">
+                            <div className="flex items-center gap-1.5 flex-1 min-w-[200px] max-w-md bg-[#1d0f0f] border border-white/10 rounded-lg px-2.5 py-1.5">
+                                <span className="material-symbols-outlined text-gray-400 text-sm">search</span>
+                                <input
+                                    type="text"
+                                    placeholder="Search questions, topics, options, explanation..."
+                                    value={searchFilter}
+                                    onChange={(e) => setSearchFilter(e.target.value)}
+                                    className="bg-transparent text-white placeholder-gray-500 focus:outline-none w-full text-xs"
+                                />
+                                {searchFilter && (
+                                    <button onClick={() => setSearchFilter('')} className="text-gray-400 hover:text-white">
+                                        <span className="material-symbols-outlined text-xs">close</span>
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="flex items-center gap-2 flex-wrap">
+                                {/* Difficulty Filter Pills */}
+                                <div className="flex items-center bg-[#1d0f0f] border border-white/10 rounded-lg p-0.5 text-[11px]">
+                                    {['all', 'easy', 'medium', 'hard'].map((d) => (
+                                        <button
+                                            key={d}
+                                            type="button"
+                                            onClick={() => setDifficultyFilter(d)}
+                                            className={`px-2.5 py-1 rounded capitalize font-medium transition ${
+                                                difficultyFilter === d
+                                                    ? 'bg-orange-600 text-white shadow-sm'
+                                                    : 'text-gray-400 hover:text-gray-200'
+                                            }`}
+                                        >
+                                            {d}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {/* Subject Filter Dropdown */}
+                                {availableSubjects.length > 1 && (
+                                    <select
+                                        value={subjectFilter}
+                                        onChange={(e) => setSubjectFilter(e.target.value)}
+                                        className="bg-[#1d0f0f] border border-white/10 text-gray-200 rounded-lg px-2.5 py-1 text-xs focus:outline-none"
+                                    >
+                                        <option value="all">All Subjects</option>
+                                        {availableSubjects.map((sub) => (
+                                            <option key={sub} value={sub}>{sub}</option>
+                                        ))}
+                                    </select>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Scrollable Questions Content */}
+                        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+                            {previewLoading ? (
+                                <div className="flex flex-col items-center justify-center py-24 text-gray-400 gap-3">
+                                    <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
+                                    <span className="text-xs">Loading generated question paper...</span>
+                                </div>
+                            ) : previewError ? (
+                                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-200 flex items-center justify-between">
+                                    <span>{previewError}</span>
+                                    <button
+                                        onClick={() => openShiftPreview(previewModal.shiftId, previewModal.shiftName)}
+                                        className="underline text-red-300 hover:text-white"
+                                    >
+                                        Retry
+                                    </button>
+                                </div>
+                            ) : filteredPreviewQuestions.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center py-20 text-gray-400 gap-2">
+                                    <span className="material-symbols-outlined text-4xl text-gray-500">find_in_page</span>
+                                    <p className="text-sm font-semibold text-gray-300">No questions match the current filter.</p>
+                                    <p className="text-xs text-gray-500">Try changing your search query or difficulty filter.</p>
+                                </div>
+                            ) : (
+                                filteredPreviewQuestions.map((q, idx) => (
+                                    <div
+                                        key={q.shift_question_id || q.id || idx}
+                                        className="p-4 rounded-xl border border-white/10 bg-[#190d0d] space-y-3 shadow-sm hover:border-white/20 transition"
+                                    >
+                                        {/* Question Card Top Bar */}
+                                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 pb-2.5">
+                                            <div className="flex items-center gap-2">
+                                                <span className="px-2 py-0.5 rounded bg-white/10 text-white font-mono font-bold text-xs">
+                                                    Q{idx + 1}
+                                                </span>
+                                                {q.subject_name && (
+                                                    <span className="text-[11px] text-gray-400 font-medium">
+                                                        {q.subject_name} {q.topic_name ? `› ${q.topic_name}` : ''}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
+                                                    q.difficulty === 'easy'
+                                                        ? 'bg-green-500/15 text-green-300 border-green-500/30'
+                                                        : q.difficulty === 'medium'
+                                                        ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                                        : 'bg-red-500/15 text-red-300 border-red-500/30'
+                                                }`}>
+                                                    {q.difficulty}
+                                                </span>
+                                                <span className="text-[11px] text-gray-400 font-mono">
+                                                    +{q.marks} / -{q.negative_marks} marks
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Question Body with KaTeX */}
+                                        <div className="text-white text-sm leading-relaxed py-1">
+                                            <KaTeXRenderer content={q.body} />
+                                        </div>
+
+                                        {/* Optional Question Diagram / Image */}
+                                        {q.image_url && (
+                                            <div className="my-2">
+                                                <img
+                                                    src={q.image_url}
+                                                    alt="Question Diagram"
+                                                    className="max-h-56 max-w-full rounded-lg border border-white/10 object-contain bg-black/40 p-1"
+                                                />
+                                            </div>
+                                        )}
+
+                                        {/* Options Grid (A, B, C, D) */}
+                                        <div className="grid sm:grid-cols-2 gap-2 pt-1">
+                                            {['a', 'b', 'c', 'd'].map((optKey) => {
+                                                const optText = q[`option_${optKey}`];
+                                                if (!optText) return null;
+                                                const isCorrect = (q.correct_opt || '').toLowerCase() === optKey;
+                                                return (
+                                                    <div
+                                                        key={optKey}
+                                                        className={`p-2.5 rounded-lg border text-xs flex items-start gap-2.5 transition ${
+                                                            isCorrect
+                                                                ? 'bg-emerald-500/15 border-emerald-500/50 text-white ring-1 ring-emerald-500/30'
+                                                                : 'bg-black/25 border-white/5 text-gray-300'
+                                                        }`}
+                                                    >
+                                                        <span className={`w-5 h-5 rounded flex items-center justify-center font-bold text-[10px] shrink-0 ${
+                                                            isCorrect ? 'bg-emerald-500 text-black' : 'bg-white/10 text-gray-400'
+                                                        }`}>
+                                                            {optKey.toUpperCase()}
+                                                        </span>
+                                                        <div className="flex-1 leading-snug">
+                                                            <KaTeXRenderer content={optText} />
+                                                        </div>
+                                                        {isCorrect && (
+                                                            <span className="text-[10px] font-bold text-emerald-400 shrink-0 flex items-center gap-0.5">
+                                                                <span className="material-symbols-outlined text-[13px]">check_circle</span>
+                                                                Correct
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+
+                                        {/* Explanation (if provided) */}
+                                        {q.explanation && (
+                                            <div className="mt-2 p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/20 text-xs text-amber-200/90 space-y-1">
+                                                <div className="flex items-center gap-1 text-amber-400 font-semibold text-[11px]">
+                                                    <span className="material-symbols-outlined text-[14px]">lightbulb</span>
+                                                    <span>Explanation</span>
+                                                </div>
+                                                <div className="leading-relaxed">
+                                                    <KaTeXRenderer content={q.explanation} />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        {/* Modal Sticky Footer */}
+                        <div className="p-3 sm:px-5 border-t border-white/10 bg-[#180d0d] flex items-center justify-between text-xs">
+                            <span className="text-gray-400">
+                                Showing <b className="text-white">{filteredPreviewQuestions.length}</b> of <b className="text-white">{previewData?.questions?.length || 0}</b> questions
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setPreviewModal(null)}
+                                className="px-4 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-semibold text-white transition"
+                            >
+                                Close Preview
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </AdminLayout>
     );
 }

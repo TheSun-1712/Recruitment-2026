@@ -3,7 +3,19 @@
 @tailwind utilities;
 
 @layer utilities {
-    .opulence-title-font {
+    .font-editorial {
+        font-family: 'Plus Jakarta Sans', 'Space Grotesk', -apple-system, sans-serif;
+    }
+
+    .font-paper-mono {
+        font-family: 'IBM Plex Mono', monospace;
+    }
+
+    .font-paper-body {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    .font-serif-accent {
         font-family: 'Cormorant Garamond', serif;
     }
 }
@@ -20,23 +32,293 @@
         overflow-x: hidden;
         min-height: 100%;
         position: relative;
-        font-family: "Space Grotesk", sans-serif;
+        font-family: "Inter", "Plus Jakarta Sans", sans-serif;
+        background-color: #122027;
+        color: #F1F5F9;
+    }
+
+    /* Coral palette selection */
+    ::selection {
+        background-color: #E76F51;
+        color: #FFFFFF;
     }
 
     ::-webkit-scrollbar {
-        width: 8px;
+        width: 7px;
+        height: 7px;
     }
 
     ::-webkit-scrollbar-track {
-        background: #120403;
+        background: #0E1A20;
     }
 
     ::-webkit-scrollbar-thumb {
-        background: #c2410c;
+        background: #264653;
         border-radius: 4px;
+        border: 1px solid rgba(42, 157, 143, 0.2);
     }
 
     ::-webkit-scrollbar-thumb:hover {
-        background: #ea580c;
+        background: #2A9D8F;
     }
+}
+
+/* ─── Keyframe Animations ─── */
+
+@keyframes float-slow {
+
+    0%,
+    100% {
+        transform: translateY(0px) rotate(0deg);
+    }
+
+    50% {
+        transform: translateY(-12px) rotate(1deg);
+    }
+}
+
+@keyframes float-slower {
+
+    0%,
+    100% {
+        transform: translateY(0px) rotate(0deg);
+    }
+
+    50% {
+        transform: translateY(-8px) rotate(-0.5deg);
+    }
+}
+
+@keyframes drift-x {
+
+    0%,
+    100% {
+        transform: translateX(0px);
+    }
+
+    50% {
+        transform: translateX(10px);
+    }
+}
+
+@keyframes fade-in-up {
+    from {
+        opacity: 0;
+        transform: translateY(16px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fade-in {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes draw-line {
+    from {
+        width: 0;
+    }
+
+    to {
+        width: 100%;
+    }
+}
+
+@keyframes pulse-warm {
+
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(194, 65, 12, 0.3);
+    }
+
+    50% {
+        box-shadow: 0 0 0 6px rgba(194, 65, 12, 0);
+    }
+}
+
+@keyframes pulse-critical {
+
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.3);
+    }
+
+    50% {
+        box-shadow: 0 0 0 8px rgba(220, 38, 38, 0);
+    }
+}
+
+@keyframes shimmer {
+    0% {
+        background-position: -200% 0;
+    }
+
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+@keyframes check-draw {
+    from {
+        stroke-dashoffset: 24;
+    }
+
+    to {
+        stroke-dashoffset: 0;
+    }
+}
+
+@keyframes scale-in {
+    from {
+        transform: scale(0.92);
+        opacity: 0;
+    }
+
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes shake {
+
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+
+    10%,
+    50%,
+    90% {
+        transform: translateX(-4px);
+    }
+
+    30%,
+    70% {
+        transform: translateX(4px);
+    }
+}
+
+/* ─── Utility Animation Classes ─── */
+
+.animate-float-slow {
+    animation: float-slow 6s ease-in-out infinite;
+}
+
+.animate-float-slower {
+    animation: float-slower 8s ease-in-out infinite;
+}
+
+.animate-drift-x {
+    animation: drift-x 7s ease-in-out infinite;
+}
+
+.animate-fade-in-up {
+    animation: fade-in-up 0.5s ease-out both;
+}
+
+.animate-fade-in {
+    animation: fade-in 0.4s ease-out both;
+}
+
+.animate-draw-line {
+    animation: draw-line 0.8s ease-out both;
+}
+
+.animate-pulse-warm {
+    animation: pulse-warm 2s ease-in-out infinite;
+}
+
+.animate-pulse-critical {
+    animation: pulse-critical 1s ease-in-out infinite;
+}
+
+.animate-scale-in {
+    animation: scale-in 0.35s ease-out both;
+}
+
+.animate-shake {
+    animation: shake 0.4s ease-out;
+}
+
+/* Stagger delays */
+.delay-100 {
+    animation-delay: 0.1s;
+}
+
+.delay-200 {
+    animation-delay: 0.2s;
+}
+
+.delay-300 {
+    animation-delay: 0.3s;
+}
+
+.delay-400 {
+    animation-delay: 0.4s;
+}
+
+.delay-500 {
+    animation-delay: 0.5s;
+}
+
+.delay-600 {
+    animation-delay: 0.6s;
+}
+
+.delay-700 {
+    animation-delay: 0.7s;
+}
+
+.delay-800 {
+    animation-delay: 0.8s;
+}
+
+/* ─── Focus States ─── */
+.focus-terracotta:focus {
+    outline: none;
+    border-color: #C2410C;
+    box-shadow: 0 0 0 3px rgba(194, 65, 12, 0.15);
+}
+
+/* ─── Custom Components ─── */
+
+.card-warm {
+    background-color: #172A32;
+    border: 1px solid rgba(42, 157, 143, 0.25);
+    border-radius: 12px;
+}
+
+.card-warm-elevated {
+    background-color: #1E3742;
+    border: 1px solid rgba(42, 157, 143, 0.35);
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.card-glass {
+    background: rgba(27, 49, 59, 0.85);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(42, 157, 143, 0.25);
+}
+
+.header-dark {
+    background-color: #122027;
+    color: #F8FAFC;
+}
+
+/* Subtle tech grid background with teal dots */
+.bg-tech-grid {
+    background-image: radial-gradient(rgba(42, 157, 143, 0.14) 1px, transparent 1px);
+    background-size: 28px 28px;
 }

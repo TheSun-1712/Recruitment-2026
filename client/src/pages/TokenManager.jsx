@@ -7,7 +7,6 @@ export default function TokenManager() {
     const [shifts, setShifts] = useState([]);
     const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, totalPages: 1 });
     const [filters, setFilters] = useState({ shift_id: '', branch: '', section: '', search: '' });
-    const [revealedTokens, setRevealedTokens] = useState({}); // { [candidateId]: boolean }
 
     // Spot registration form state
     const [formData, setFormData] = useState({
@@ -498,7 +497,6 @@ export default function TokenManager() {
                         </thead>
                         <tbody className="divide-y divide-white/5">
                             {candidates.map((c) => {
-                                const isRevealed = revealedTokens[c.id];
                                 return (
                                     <tr key={c.id} className="hover:bg-white/[0.02] transition">
                                         <td className="py-3 px-4">
@@ -515,18 +513,7 @@ export default function TokenManager() {
                                         </td>
                                         <td className="py-3 px-4">
                                             <div className="inline-flex items-center space-x-1.5 bg-[#0d0707] border border-white/10 rounded-lg px-2 py-1 font-mono text-[11px]">
-                                                <span>
-                                                    {isRevealed ? c.token : `${c.token.slice(0, 8)}••••••••`}
-                                                </span>
-                                                <button
-                                                    onClick={() => setRevealedTokens({ ...revealedTokens, [c.id]: !isRevealed })}
-                                                    className="text-gray-500 hover:text-white"
-                                                    title={isRevealed ? 'Hide Token' : 'Reveal Token'}
-                                                >
-                                                    <span className="material-symbols-outlined text-[14px]">
-                                                        {isRevealed ? 'visibility_off' : 'visibility'}
-                                                    </span>
-                                                </button>
+                                                <span>{c.token}</span>
                                                 <button
                                                     onClick={() => handleCopyToken(c.token)}
                                                     className="text-gray-500 hover:text-orange-400"
@@ -539,7 +526,7 @@ export default function TokenManager() {
                                         <td className="py-3 px-4 text-center">
                                             {c.is_submitted ? (
                                                 <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 text-[10px] font-bold">
-                                                    Submitted ({c.score !== null ? c.score : '—'})
+                                                    Submitted ({c.score})
                                                 </span>
                                             ) : c.token_used ? (
                                                 <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-bold flex items-center justify-center space-x-1">

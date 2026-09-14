@@ -548,4 +548,82 @@ router.get('/:id/candidates', async (req, res) => {
     }
 });
 
+// GET /admin/shifts/:id/questions - List questions generated for shift
+router.get('/:id/questions', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const shiftRes = await pool.query(
+            `SELECT s.id, s.name, s.paper_generated, s.exam_id, ec.name AS exam_name
+             FROM shifts s
+             LEFT JOIN exam_config ec ON ec.id = s.exam_id
+             WHERE s.id = $1`,
+            [id]
+        );
+
+        if (shiftRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Shift not found' });
+        }
+
+        const shift = shiftRes.rows[0];
+
+        const questionsRes = await pool.query(
+            `SELECT 
+                sq.id AS shift_question_id,
+                q.id,
+                q.difficulty,
+                q.body,
+                q.option_a,
+                q.option_b,
+                q.option_c,
+                q.option_d,
+                q.correct_opt,
+                q.explanation,
+                q.marks,
+                q.negative_marks,
+                q.image_url,
+                t.id AS topic_id,
+                t.name AS topic_name,
+                s.id AS subject_id,
+                s.name AS subject_name
+             FROM shift_questions sq
+             JOIN questions q ON q.id = sq.question_id
+             LEFT JOIN topics t ON t.id = q.topic_id
+             LEFT JOIN subjects s ON s.id = t.subject_id
+             WHERE sq.shift_id = $1
+             ORDER BY sq.id ASC`,
+            [id]
+        );
+
+        const questions = questionsRes.rows;
+        let totalMarks = 0;
+        const breakdown = { easy: 0, medium: 0, hard: 0 };
+
+        for (const q of questions) {
+            totalMarks += parseFloat(q.marks || 0);
+            const diff = (q.difficulty || '').toLowerCase();
+            if (breakdown[diff] !== undefined) {
+                breakdown[diff]++;
+            }
+        }
+
+        res.json({
+            success: true,
+            shift: {
+                id: shift.id,
+                name: shift.name,
+                exam_id: shift.exam_id,
+                exam_name: shift.exam_name,
+                paper_generated: shift.paper_generated,
+            },
+            totalQuestions: questions.length,
+            totalMarks: Math.round(totalMarks * 100) / 100,
+            breakdown,
+            questions,
+        });
+    } catch (err) {
+        console.error('GET /admin/shifts/:id/questions error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

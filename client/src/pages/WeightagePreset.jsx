@@ -5,7 +5,7 @@ import { adminFetch } from '../utils/api';
 export default function WeightagePreset() {
     const [exam, setExam] = useState(null);
     const [subjects, setSubjects] = useState([]);
-    const [rules, setRules] = useState({}); // { [topicId]: { easy: 0, medium: 0, hard: 0, student_easy: 0, student_medium: 0, student_hard: 0 } }
+    const [rules, setRules] = useState({}); // { [topicId]: { easy: 0, medium: 0, hard: 0 } }
     const [selectedSubjectId, setSelectedSubjectId] = useState('all');
     const [validation, setValidation] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -50,9 +50,6 @@ export default function WeightagePreset() {
                     easy: r.easy_count || 0,
                     medium: r.medium_count || 0,
                     hard: r.hard_count || 0,
-                    student_easy: r.student_easy_count || 0,
-                    student_medium: r.student_medium_count || 0,
-                    student_hard: r.student_hard_count || 0,
                 };
             });
             setRules(rulesMap);
@@ -97,40 +94,29 @@ export default function WeightagePreset() {
         let easy = 0;
         let medium = 0;
         let hard = 0;
-        let student_easy = 0;
-        let student_medium = 0;
-        let student_hard = 0;
         Object.values(rules).forEach((r) => {
             easy += Number(r.easy || 0);
             medium += Number(r.medium || 0);
             hard += Number(r.hard || 0);
-            student_easy += Number(r.student_easy || 0);
-            student_medium += Number(r.student_medium || 0);
-            student_hard += Number(r.student_hard || 0);
         });
         const grandTotal = easy + medium + hard;
-        const studentGrandTotal = student_easy + student_medium + student_hard;
         const target = exam?.questions_per_shift || 75;
-        const studentTarget = exam?.questions_per_candidate || 30;
         const diff = grandTotal - target;
-        const studentDiff = studentGrandTotal - studentTarget;
-        return { easy, medium, hard, grandTotal, target, diff, student_easy, student_medium, student_hard, studentGrandTotal, studentTarget, studentDiff };
+        return { easy, medium, hard, grandTotal, target, diff };
     }, [rules, exam]);
 
     function handleCountChange(topicId, difficulty, value) {
-        if (isLocked) return;
         const cleanVal = Math.max(0, parseInt(value, 10) || 0);
         setRules((prev) => ({
             ...prev,
             [topicId]: {
-                ...(prev[topicId] || { easy: 0, medium: 0, hard: 0, student_easy: 0, student_medium: 0, student_hard: 0 }),
+                ...(prev[topicId] || { easy: 0, medium: 0, hard: 0 }),
                 [difficulty]: cleanVal,
             },
         }));
     }
 
     function handleQuickStep(topicId, difficulty, delta) {
-        if (isLocked) return;
         const current = rules[topicId]?.[difficulty] || 0;
         const next = Math.max(0, current + delta);
         handleCountChange(topicId, difficulty, next);
@@ -138,7 +124,7 @@ export default function WeightagePreset() {
 
     // Quick distribution helpers
     function handleDistributeEqually() {
-        if (isLocked || allTopics.length === 0) return;
+        if (allTopics.length === 0) return;
         const target = exam?.questions_per_shift || 75;
         const perTopic = Math.floor(target / allTopics.length);
         const easyPerTopic = Math.floor(perTopic * 0.33);
@@ -151,9 +137,6 @@ export default function WeightagePreset() {
                 easy: easyPerTopic,
                 medium: mediumPerTopic,
                 hard: hardPerTopic,
-                student_easy: Math.floor(easyPerTopic * 0.4),
-                student_medium: Math.floor(mediumPerTopic * 0.4),
-                student_hard: Math.floor(hardPerTopic * 0.4),
             };
         });
 
@@ -171,10 +154,9 @@ export default function WeightagePreset() {
     }
 
     function handleResetZero() {
-        if (isLocked) return;
         const newRules = {};
         allTopics.forEach((t) => {
-            newRules[t.id] = { easy: 0, medium: 0, hard: 0, student_easy: 0, student_medium: 0, student_hard: 0 };
+            newRules[t.id] = { easy: 0, medium: 0, hard: 0 };
         });
         setRules(newRules);
     }
@@ -191,9 +173,6 @@ export default function WeightagePreset() {
                 easy_count: rules[t.id]?.easy || 0,
                 medium_count: rules[t.id]?.medium || 0,
                 hard_count: rules[t.id]?.hard || 0,
-                student_easy_count: rules[t.id]?.student_easy || 0,
-                student_medium_count: rules[t.id]?.student_medium || 0,
-                student_hard_count: rules[t.id]?.student_hard || 0,
             }));
 
             await adminFetch(`/admin/weightage/${exam.id}`, {
@@ -219,7 +198,7 @@ export default function WeightagePreset() {
                 <div className="flex items-center space-x-3">
                     <button
                         onClick={handleSave}
-                        disabled={saving || isLocked || !exam}
+                        disabled={saving || !exam}
                         className="px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white rounded-lg text-xs font-bold tracking-wider uppercase transition flex items-center space-x-2 shadow-lg shadow-orange-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <span className="material-symbols-outlined text-[18px]">
@@ -233,11 +212,12 @@ export default function WeightagePreset() {
             {/* Banner notifications */}
             {isLocked && (
                 <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 flex items-start space-x-3">
-                    <span className="material-symbols-outlined text-amber-400 mt-0.5">lock</span>
+                    <span className="material-symbols-outlined text-amber-400 mt-0.5">warning</span>
                     <div className="text-xs">
-                        <strong className="block text-amber-200 font-semibold mb-0.5">Weightage Rules Locked</strong>
-                        Question papers have already been generated for one or more shifts in this exam.
-                        Weightage configuration cannot be modified unless papers are regenerated in the Paper Generator.
+                        <strong className="block text-amber-200 font-semibold mb-0.5">Papers Already Generated</strong>
+                        One or more shifts already have question papers generated. You can still edit and save weightage rules here,
+                        but the changes will only take effect after you re-generate papers in the{' '}
+                        <a href="/admin/generate" className="text-orange-400 hover:text-orange-300 underline font-semibold">Paper Generator</a>.
                     </div>
                 </div>
             )}
@@ -352,25 +332,23 @@ export default function WeightagePreset() {
                 </div>
 
                 {/* Quick helpers */}
-                {!isLocked && (
-                    <div className="flex items-center space-x-2 w-full lg:w-auto justify-end">
-                        <button
-                            onClick={handleDistributeEqually}
-                            className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-medium text-gray-300 hover:text-white transition flex items-center space-x-1"
-                            title="Distribute 75 questions evenly across all syllabus topics"
-                        >
-                            <span className="material-symbols-outlined text-[15px]">balance</span>
-                            <span>Equal Distribution</span>
-                        </button>
-                        <button
-                            onClick={handleResetZero}
-                            className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 transition flex items-center space-x-1"
-                        >
-                            <span className="material-symbols-outlined text-[15px]">restart_alt</span>
-                            <span>Reset All</span>
-                        </button>
-                    </div>
-                )}
+                <div className="flex items-center space-x-2 w-full lg:w-auto justify-end">
+                    <button
+                        onClick={handleDistributeEqually}
+                        className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-medium text-gray-300 hover:text-white transition flex items-center space-x-1"
+                        title="Distribute target questions evenly across all syllabus topics"
+                    >
+                        <span className="material-symbols-outlined text-[15px]">balance</span>
+                        <span>Equal Distribution</span>
+                    </button>
+                    <button
+                        onClick={handleResetZero}
+                        className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 transition flex items-center space-x-1"
+                    >
+                        <span className="material-symbols-outlined text-[15px]">restart_alt</span>
+                        <span>Reset All</span>
+                    </button>
+                </div>
             </div>
 
             {/* Weightage Grid Table */}
@@ -380,10 +358,10 @@ export default function WeightagePreset() {
                         <thead>
                             <tr className="bg-white/5 border-b border-white/10 text-gray-400 uppercase tracking-wider text-[10px]">
                                 <th className="py-3 px-4 font-bold">Subject / Topic</th>
-                                <th className="py-3 px-4 font-bold text-center text-green-400">Easy (Shift / Student)</th>
-                                <th className="py-3 px-4 font-bold text-center text-amber-400">Medium (Shift / Student)</th>
-                                <th className="py-3 px-4 font-bold text-center text-red-400">Hard (Shift / Student)</th>
-                                <th className="py-3 px-4 font-bold text-center w-28 text-white">Row Totals</th>
+                                <th className="py-3 px-4 font-bold text-center w-36 text-green-400">Easy</th>
+                                <th className="py-3 px-4 font-bold text-center w-36 text-amber-400">Medium</th>
+                                <th className="py-3 px-4 font-bold text-center w-36 text-red-400">Hard</th>
+                                <th className="py-3 px-4 font-bold text-center w-28 text-white">Row Total</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
@@ -400,57 +378,95 @@ export default function WeightagePreset() {
                                                 {topic.code && <span>• {topic.code}</span>}
                                             </div>
                                         </td>
-                                        <td className="py-3 px-2 text-center">
-                                            <div className="flex flex-col space-y-2 items-center">
-                                                <div className="inline-flex items-center bg-[#0d0707] border border-green-500/30 rounded-lg p-0.5">
-                                                    <span className="text-[9px] text-gray-500 uppercase px-2 font-bold w-12 text-left">Shift</span>
-                                                    <button onClick={() => handleQuickStep(topic.id, 'easy', -1)} disabled={isLocked || tRule.easy <= 0} className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30">-</button>
-                                                    <input type="number" min="0" max="75" disabled={isLocked} value={tRule.easy} onChange={(e) => handleCountChange(topic.id, 'easy', e.target.value)} className="w-8 text-center bg-transparent text-green-400 font-bold text-xs focus:outline-none" />
-                                                    <button onClick={() => handleQuickStep(topic.id, 'easy', 1)} disabled={isLocked} className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30">+</button>
-                                                </div>
-                                                <div className="inline-flex items-center bg-[#0d0707] border border-green-500/30 rounded-lg p-0.5">
-                                                    <span className="text-[9px] text-gray-500 uppercase px-2 font-bold w-12 text-left">Student</span>
-                                                    <button onClick={() => handleQuickStep(topic.id, 'student_easy', -1)} disabled={isLocked || tRule.student_easy <= 0} className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30">-</button>
-                                                    <input type="number" min="0" max="75" disabled={isLocked} value={tRule.student_easy} onChange={(e) => handleCountChange(topic.id, 'student_easy', e.target.value)} className="w-8 text-center bg-transparent text-green-400 font-bold text-xs focus:outline-none" />
-                                                    <button onClick={() => handleQuickStep(topic.id, 'student_easy', 1)} disabled={isLocked} className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30">+</button>
-                                                </div>
+
+                                        {/* Easy Input */}
+                                        <td className="py-3 px-4 text-center">
+                                            <div className="inline-flex items-center bg-[#0d0707] border border-green-500/30 rounded-lg p-0.5">
+                                                <button
+                                                    onClick={() => handleQuickStep(topic.id, 'easy', -1)}
+                                                    disabled={tRule.easy <= 0}
+                                                    className="w-6 h-6 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30"
+                                                >
+                                                    -
+                                                </button>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    max="999"
+                                                    value={tRule.easy}
+                                                    onChange={(e) => handleCountChange(topic.id, 'easy', e.target.value)}
+                                                    className="w-12 text-center bg-transparent text-green-400 font-bold text-xs focus:outline-none"
+                                                />
+                                                <button
+                                                    onClick={() => handleQuickStep(topic.id, 'easy', 1)}
+                                                    className="w-6 h-6 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30"
+                                                >
+                                                    +
+                                                </button>
                                             </div>
                                         </td>
-                                        <td className="py-3 px-2 text-center">
-                                            <div className="flex flex-col space-y-2 items-center">
-                                                <div className="inline-flex items-center bg-[#0d0707] border border-amber-500/30 rounded-lg p-0.5">
-                                                    <span className="text-[9px] text-gray-500 uppercase px-2 font-bold w-12 text-left">Shift</span>
-                                                    <button onClick={() => handleQuickStep(topic.id, 'medium', -1)} disabled={isLocked || tRule.medium <= 0} className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30">-</button>
-                                                    <input type="number" min="0" max="75" disabled={isLocked} value={tRule.medium} onChange={(e) => handleCountChange(topic.id, 'medium', e.target.value)} className="w-8 text-center bg-transparent text-amber-400 font-bold text-xs focus:outline-none" />
-                                                    <button onClick={() => handleQuickStep(topic.id, 'medium', 1)} disabled={isLocked} className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30">+</button>
-                                                </div>
-                                                <div className="inline-flex items-center bg-[#0d0707] border border-amber-500/30 rounded-lg p-0.5">
-                                                    <span className="text-[9px] text-gray-500 uppercase px-2 font-bold w-12 text-left">Student</span>
-                                                    <button onClick={() => handleQuickStep(topic.id, 'student_medium', -1)} disabled={isLocked || tRule.student_medium <= 0} className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30">-</button>
-                                                    <input type="number" min="0" max="75" disabled={isLocked} value={tRule.student_medium} onChange={(e) => handleCountChange(topic.id, 'student_medium', e.target.value)} className="w-8 text-center bg-transparent text-amber-400 font-bold text-xs focus:outline-none" />
-                                                    <button onClick={() => handleQuickStep(topic.id, 'student_medium', 1)} disabled={isLocked} className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30">+</button>
-                                                </div>
+
+                                        {/* Medium Input */}
+                                        <td className="py-3 px-4 text-center">
+                                            <div className="inline-flex items-center bg-[#0d0707] border border-amber-500/30 rounded-lg p-0.5">
+                                                <button
+                                                    onClick={() => handleQuickStep(topic.id, 'medium', -1)}
+                                                    disabled={tRule.medium <= 0}
+                                                    className="w-6 h-6 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30"
+                                                >
+                                                    -
+                                                </button>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    max="999"
+                                                    value={tRule.medium}
+                                                    onChange={(e) => handleCountChange(topic.id, 'medium', e.target.value)}
+                                                    className="w-12 text-center bg-transparent text-amber-400 font-bold text-xs focus:outline-none"
+                                                />
+                                                <button
+                                                    onClick={() => handleQuickStep(topic.id, 'medium', 1)}
+                                                    className="w-6 h-6 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30"
+                                                >
+                                                    +
+                                                </button>
                                             </div>
                                         </td>
-                                        <td className="py-3 px-2 text-center">
-                                            <div className="flex flex-col space-y-2 items-center">
-                                                <div className="inline-flex items-center bg-[#0d0707] border border-red-500/30 rounded-lg p-0.5">
-                                                    <span className="text-[9px] text-gray-500 uppercase px-2 font-bold w-12 text-left">Shift</span>
-                                                    <button onClick={() => handleQuickStep(topic.id, 'hard', -1)} disabled={isLocked || tRule.hard <= 0} className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30">-</button>
-                                                    <input type="number" min="0" max="75" disabled={isLocked} value={tRule.hard} onChange={(e) => handleCountChange(topic.id, 'hard', e.target.value)} className="w-8 text-center bg-transparent text-red-400 font-bold text-xs focus:outline-none" />
-                                                    <button onClick={() => handleQuickStep(topic.id, 'hard', 1)} disabled={isLocked} className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30">+</button>
-                                                </div>
-                                                <div className="inline-flex items-center bg-[#0d0707] border border-red-500/30 rounded-lg p-0.5">
-                                                    <span className="text-[9px] text-gray-500 uppercase px-2 font-bold w-12 text-left">Student</span>
-                                                    <button onClick={() => handleQuickStep(topic.id, 'student_hard', -1)} disabled={isLocked || tRule.student_hard <= 0} className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30">-</button>
-                                                    <input type="number" min="0" max="75" disabled={isLocked} value={tRule.student_hard} onChange={(e) => handleCountChange(topic.id, 'student_hard', e.target.value)} className="w-8 text-center bg-transparent text-red-400 font-bold text-xs focus:outline-none" />
-                                                    <button onClick={() => handleQuickStep(topic.id, 'student_hard', 1)} disabled={isLocked} className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30">+</button>
-                                                </div>
+
+                                        {/* Hard Input */}
+                                        <td className="py-3 px-4 text-center">
+                                            <div className="inline-flex items-center bg-[#0d0707] border border-red-500/30 rounded-lg p-0.5">
+                                                <button
+                                                    onClick={() => handleQuickStep(topic.id, 'hard', -1)}
+                                                    disabled={tRule.hard <= 0}
+                                                    className="w-6 h-6 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30"
+                                                >
+                                                    -
+                                                </button>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    max="999"
+                                                    value={tRule.hard}
+                                                    onChange={(e) => handleCountChange(topic.id, 'hard', e.target.value)}
+                                                    className="w-12 text-center bg-transparent text-red-400 font-bold text-xs focus:outline-none"
+                                                />
+                                                <button
+                                                    onClick={() => handleQuickStep(topic.id, 'hard', 1)}
+                                                    className="w-6 h-6 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30"
+                                                >
+                                                    +
+                                                </button>
                                             </div>
                                         </td>
-                                        <td className="py-3 px-4 text-center font-bold text-gray-300">
-                                            <div className="text-xs">{rowTotal} <span className="text-[10px] text-gray-500 font-normal">Shift</span></div>
-                                            <div className="text-xs mt-1 text-blue-300">{(tRule.student_easy || 0) + (tRule.student_medium || 0) + (tRule.student_hard || 0)} <span className="text-[10px] text-gray-500 font-normal">Student</span></div>
+
+                                        {/* Row Total */}
+                                        <td className="py-3 px-4 text-center">
+                                            <span className={`inline-block px-2.5 py-1 rounded-md text-xs font-black ${
+                                                rowTotal > 0 ? 'bg-white/10 text-white' : 'text-gray-600'
+                                            }`}>
+                                                {rowTotal}
+                                            </span>
                                         </td>
                                     </tr>
                                 );

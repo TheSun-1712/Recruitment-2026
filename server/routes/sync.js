@@ -102,7 +102,7 @@ router.post('/', async (req, res) => {
           topicId = topicRes.rows[0].id;
         }
 
-        // 5. Insert question into local DB
+        // 5. Insert question into local DB (with optional option image support)
         await client.query(
           `INSERT INTO questions
             (exam_id, topic_id, difficulty, body, option_a, option_b, option_c, option_d, correct_opt, explanation, image_url, opt_a_image_url, opt_b_image_url, opt_c_image_url, opt_d_image_url)

@@ -10,7 +10,6 @@ export default function ExamConfig() {
     const [graceMinutes, setGraceMinutes] = useState(15);
     const [durationMinutes, setDurationMinutes] = useState(60);
     const [questionsPerShift, setQuestionsPerShift] = useState(75);
-    const [questionsPerCandidate, setQuestionsPerCandidate] = useState(30);
     
     // Grading states (part of Exam Config now, though V1 plan suggested a separate page, we can put it here or as a separate page. The plan said "Workstream C — Grading: New GradingConfig page", but wait, in the plan I said "Make ExamConfig.jsx have pass_mark_pct and grade_ranges"? Ah, in the plan I wrote "Frontend: [NEW] client/src/pages/GradingConfig.jsx". Let me stick to the plan: GradingConfig.jsx is a separate page. BUT I also wrote in Workstream A for ExamConfig.jsx: "Add pass_mark_pct field ... Add grade range builder... Add an exam selector at top". So I'll put it here or there. I'll put basic fields here, and the full application in GradingConfig? No, let's just make sure ExamConfig has what the plan explicitly said. Wait, the plan explicitly said:
     // "Make `total_duration_min` an editable input... Make `questions_per_shift` an editable input... Add `pass_mark_pct` field... Add grade range builder... Add an exam selector at top" in ExamConfig.jsx. OK, I will add them here.)
@@ -47,7 +46,6 @@ export default function ExamConfig() {
                 setGraceMinutes(targetExam.grace_join_min || 15);
                 setDurationMinutes(targetExam.total_duration_min || 60);
                 setQuestionsPerShift(targetExam.questions_per_shift || 75);
-                setQuestionsPerCandidate(targetExam.questions_per_candidate || 30);
                 setPassMarkPct(targetExam.pass_mark_pct || 40);
                 setGradeRanges(targetExam.grade_ranges || []);
                 setStats({
@@ -83,7 +81,6 @@ export default function ExamConfig() {
                         grace_join_min: parseInt(graceMinutes, 10),
                         total_duration_min: parseInt(durationMinutes, 10),
                         questions_per_shift: parseInt(questionsPerShift, 10),
-                        questions_per_candidate: parseInt(questionsPerCandidate, 10),
                         pass_mark_pct: parseFloat(passMarkPct),
                         grade_ranges: gradeRanges,
                     }),
@@ -97,7 +94,6 @@ export default function ExamConfig() {
                         grace_join_min: parseInt(graceMinutes, 10),
                         total_duration_min: parseInt(durationMinutes, 10),
                         questions_per_shift: parseInt(questionsPerShift, 10),
-                        questions_per_candidate: parseInt(questionsPerCandidate, 10),
                     }),
                 });
                 setMsg('New exam created and configured.');
@@ -276,22 +272,7 @@ export default function ExamConfig() {
                                     onChange={(e) => setQuestionsPerShift(e.target.value)}
                                     className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500 transition"
                                 />
-                                <p className="text-[11px] text-gray-500 mt-1">Total questions in shift pool (e.g. 75).</p>
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                                    Questions Per Candidate
-                                </label>
-                                <input
-                                    type="number"
-                                    min="1"
-                                    required
-                                    value={questionsPerCandidate}
-                                    onChange={(e) => setQuestionsPerCandidate(e.target.value)}
-                                    className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500 transition"
-                                />
-                                <p className="text-[11px] text-gray-500 mt-1">Each candidate receives this many questions (e.g. 30).</p>
+                                <p className="text-[11px] text-gray-500 mt-1">Each candidate receives this many questions.</p>
                             </div>
 
                             <div>

@@ -5,6 +5,17 @@ import '@fontsource/space-grotesk/600.css';
 import '@fontsource/space-grotesk/700.css';
 import '@fontsource/cormorant-garamond/400.css';
 import '@fontsource/cormorant-garamond/700.css';
+import '@fontsource/ibm-plex-mono/400.css';
+import '@fontsource/ibm-plex-mono/600.css';
+import '@fontsource/ibm-plex-mono/700.css';
+import '@fontsource/inter/400.css';
+import '@fontsource/inter/500.css';
+import '@fontsource/inter/600.css';
+import '@fontsource/inter/700.css';
+import '@fontsource/plus-jakarta-sans/400.css';
+import '@fontsource/plus-jakarta-sans/600.css';
+import '@fontsource/plus-jakarta-sans/700.css';
+import '@fontsource/plus-jakarta-sans/800.css';
 import 'material-symbols/outlined.css';
 
 import { StrictMode } from 'react'
@@ -13,6 +24,7 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { loader } from '@monaco-editor/react';
 import { Navigate } from "react-router-dom";
 import App from './App.jsx'
+import CandidateLanding from './pages/CandidateLanding.jsx'
 import CandidateLogin from './pages/CandidateLogin.jsx'
 import ExamRoute from './components/ExamRoute.jsx'
 import ExamPage from './pages/ExamPage.jsx'
@@ -28,7 +40,6 @@ import ResultsDashboard from './pages/ResultsDashboard.jsx'
 import AdminSampleInputs from './pages/AdminSampleInputs.jsx'
 import GradingConfig from './pages/GradingConfig.jsx'
 import './index.css'
-import AnimatedShaderHero from './components/ui/animated-shader-hero.jsx';
 
 // Point Monaco Editor to local files instead of the CDN (works offline on LAN)
 loader.config({ paths: { vs: `${import.meta.env.BASE_URL}node_modules/monaco-editor/min/vs` } });
@@ -40,7 +51,7 @@ loader.init().catch(() => { /* silently ignore — fallback handled by Editor co
 const router = createBrowserRouter([
     {
         path: "/",
-        element: <CandidateLogin />
+        element: <CandidateLanding />
     },
     {
         path: "/login",
@@ -53,10 +64,6 @@ const router = createBrowserRouter([
                 <ExamPage />
             </ExamRoute>
         )
-    },
-    {
-        path: "/ani",
-        element: <AnimatedShaderHero />
     },
     {
         path: "/app",

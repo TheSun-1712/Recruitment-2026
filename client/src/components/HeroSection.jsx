@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
+import FooterLogos from "./FooterLogos";
 
 export default function HeroSection({ onJoin }) {
     return (
@@ -155,11 +156,14 @@ export default function HeroSection({ onJoin }) {
                 whileInView={{ opacity: 1 }}
                 viewport={{ once: true }}
                 transition={{ duration: 0.6, delay: 0.5 }}
-                className="mt-20 sm:mt-32 py-8 sm:py-10 border-t border-white/10 text-center"
+                className="mt-20 sm:mt-32 py-8 sm:py-10 border-t border-white/10"
             >
-                <p className="text-[10px] uppercase tracking-[0.5em] text-orange-200/40 font-bold">
-                    © 2026 OPULENCE MARTIAN ARENA
-                </p>
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <p className="text-[10px] uppercase tracking-[0.5em] text-orange-200/40 font-bold">
+                        © 2026 OPULENCE MARTIAN ARENA • AAC GRIET
+                    </p>
+                    <FooterLogos />
+                </div>
             </motion.footer>
         </section>
     );

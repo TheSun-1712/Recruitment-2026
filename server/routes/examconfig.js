@@ -55,7 +55,7 @@ router.get('/', async (req, res) => {
 
 // POST /admin/exam - Create new exam
 router.post('/', async (req, res) => {
-    const { name, total_duration_min, grace_join_min, questions_per_shift, questions_per_candidate } = req.body;
+    const { name, total_duration_min, grace_join_min, questions_per_shift } = req.body;
     if (!name || !name.trim()) {
         return res.status(400).json({ error: 'Exam name is required' });
     }
@@ -67,15 +67,14 @@ router.post('/', async (req, res) => {
 
         const result = await pool.query(
             `INSERT INTO exam_config 
-                (name, total_duration_min, grace_join_min, questions_per_shift, questions_per_candidate, is_active)
-             VALUES ($1, $2, $3, $4, $5, $6)
+                (name, total_duration_min, grace_join_min, questions_per_shift, is_active)
+             VALUES ($1, $2, $3, $4, $5)
              RETURNING *`,
             [
                 name.trim(),
                 parseInt(total_duration_min, 10) || 60,
                 parseInt(grace_join_min, 10) || 15,
                 parseInt(questions_per_shift, 10) || 75,
-                parseInt(questions_per_candidate, 10) || 30,
                 isFirst,
             ]
         );
@@ -90,12 +89,16 @@ router.post('/', async (req, res) => {
 // PUT /admin/exam/:id - Update exam config (blocked if papers generated)
 router.put('/:id', async (req, res) => {
     const { id } = req.params;
-    const { name, total_duration_min, grace_join_min, questions_per_shift, questions_per_candidate, pass_mark_pct, grade_ranges } = req.body;
+    const { name, total_duration_min, grace_join_min, questions_per_shift, pass_mark_pct, grade_ranges } = req.body;
 
     try {
         // Check if any shift for this exam already has papers generated
         const lockedCheck = await pool.query(
-            `SELECT id, name FROM shifts WHERE exam_id = $1 AND paper_generated = true LIMIT 1`,
+            `SELECT s.id, s.name FROM shifts s
+             WHERE s.exam_id = $1 
+               AND s.paper_generated = true
+               AND EXISTS (SELECT 1 FROM shift_questions sq WHERE sq.shift_id = s.id)
+             LIMIT 1`,
             [id]
         );
 
@@ -118,17 +121,15 @@ router.put('/:id', async (req, res) => {
                  total_duration_min = $2,
                  grace_join_min = $3,
                  questions_per_shift = $4,
-                 questions_per_candidate = $5,
-                 pass_mark_pct = $6,
-                 grade_ranges = $7
-             WHERE id = $8
+                 pass_mark_pct = $5,
+                 grade_ranges = $6
+             WHERE id = $7
              RETURNING *`,
             [
                 name !== undefined ? name.trim() : current.name,
                 total_duration_min !== undefined ? parseInt(total_duration_min, 10) : current.total_duration_min,
                 grace_join_min !== undefined ? parseInt(grace_join_min, 10) : current.grace_join_min,
                 questions_per_shift !== undefined ? parseInt(questions_per_shift, 10) : current.questions_per_shift,
-                questions_per_candidate !== undefined ? parseInt(questions_per_candidate, 10) : current.questions_per_candidate,
                 pass_mark_pct !== undefined ? parseFloat(pass_mark_pct) : current.pass_mark_pct,
                 grade_ranges !== undefined ? JSON.stringify(grade_ranges) : current.grade_ranges,
                 id,

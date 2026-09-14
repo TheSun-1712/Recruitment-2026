@@ -4,18 +4,23 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
     "@fontsource/cormorant-garamond": "^5.2.11",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/plus-jakarta-sans": "^5.3.0",
     "@fontsource/space-grotesk": "^5.2.10",
     "@monaco-editor/react": "^4.7.0",
     "axios": "^1.13.4",
+    "clsx": "^2.1.1",
     "framer-motion": "^12.38.0",
     "katex": "^0.18.7",
+    "lucide-react": "^1.45.0",
     "material-symbols": "^0.42.3",
     "monaco-editor": "^0.45.0",
     "react": "^19.2.0",
@@ -25,7 +30,8 @@
     "react-router-dom": "^7.13.0",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
-    "socket.io-client": "^4.8.3"
+    "socket.io-client": "^4.8.3",
+    "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

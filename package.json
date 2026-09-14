@@ -1,0 +1,22 @@
+{
+  "name": "gp-ultimate-quiz-platform",
+  "version": "1.0.0",
+  "description": "Grand Prix Ultimate Quiz & Offline MCQ Exam Platform",
+  "scripts": {
+    "db:setup": "bash server/scripts/setup_local_db.sh",
+    "db:start": "bash server/scripts/start-db.sh",
+    "db:stop": "bash server/scripts/stop-db.sh",
+    "server": "cd server && npm start",
+    "client": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "start": "bash start-platform.sh"
+  },
+  "keywords": [
+    "offline-exam",
+    "quiz-platform",
+    "proctoring",
+    "mcq"
+  ],
+  "author": "",
+  "license": "ISC"
+}

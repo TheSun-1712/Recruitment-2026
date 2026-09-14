@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import FooterLogos from "../components/FooterLogos";
 
 const BACKEND_URL = import.meta.env.VITE_API_URL;
 
@@ -88,7 +89,7 @@ export default function AdminSampleInputs() {
     };
 
     return (
-        <div className="min-h-screen bg-[#111] text-white font-sans">
+        <div className="min-h-screen bg-[#111] text-white font-sans flex flex-col justify-between">
             {/* Header */}
 
             <header className="flex flex-col gap-4 border-b border-white/10 px-4 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
@@ -204,6 +205,14 @@ export default function AdminSampleInputs() {
                     </div>
                 )}
             </div>
+
+            {/* Footer */}
+            <footer className="border-t border-white/10 bg-[#0d0707] px-4 sm:px-6 lg:px-8 py-4 mt-12">
+                <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-400 font-mono">
+                    <div>Admin Tools • Advanced Academic Center • GRIET</div>
+                    <FooterLogos />
+                </div>
+            </footer>
         </div>
     );
 }

@@ -111,6 +111,8 @@ CREATE TABLE questions (
 
   correct_opt  CHAR(1) NOT NULL CHECK(correct_opt IN ('a','b','c','d')),
   explanation  TEXT,                    -- shown post-submission (optional)
+  marks        NUMERIC(10,2) NOT NULL DEFAULT 1 CHECK (marks > 0),
+  negative_marks NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (negative_marks >= 0),
 
   -- Optional image: stored as relative file path or base64 data URI
   image_url    TEXT,
@@ -184,7 +186,7 @@ CREATE TABLE candidate_sessions (
   admin_reopened     BOOLEAN NOT NULL DEFAULT false,
   admin_reopen_at    TIMESTAMPTZ,
 
-  score              INT,
+  score              NUMERIC(10,2),
   created_at         TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -211,8 +213,9 @@ CREATE TABLE results (
   id               SERIAL PRIMARY KEY,
   candidate_id     INT NOT NULL REFERENCES candidates(id),
   shift_id         INT NOT NULL REFERENCES shifts(id),
-  score            INT NOT NULL,
+  score            NUMERIC(10,2) NOT NULL,
   total_questions  INT NOT NULL DEFAULT 75,
+  total_marks      NUMERIC(10,2),
   correct_count    INT NOT NULL,
   wrong_count      INT NOT NULL,
   skipped_count    INT NOT NULL,

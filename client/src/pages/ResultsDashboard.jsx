@@ -602,15 +602,6 @@ export default function ResultsDashboard() {
                                                             <span className="font-bold text-xs uppercase">{opt})</span>
                                                             <div className="flex-1">
                                                                 <KaTeXRenderer text={optText || ''} />
-                                                                {q[`opt_${opt.toLowerCase()}_image_url`] && (
-                                                                    <div className="mt-2">
-                                                                        <img
-                                                                            src={q[`opt_${opt.toLowerCase()}_image_url`].startsWith('http') ? q[`opt_${opt.toLowerCase()}_image_url`] : `${API_URL}${q[`opt_${opt.toLowerCase()}_image_url`]}`}
-                                                                            alt={`Option ${opt} image`}
-                                                                            className="max-h-24 rounded border border-white/10 shadow-sm object-contain"
-                                                                        />
-                                                                    </div>
-                                                                )}
                                                             </div>
                                                             {isCandidateSelected && (
                                                                 <span className="text-[10px] font-bold uppercase ml-1 px-1 rounded bg-white/10">

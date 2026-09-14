@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import FooterLogos from './FooterLogos';
 
 const NAV_ITEMS = [
     { name: 'Dashboard', path: '/admin/dashboard', icon: 'dashboard' },
@@ -118,6 +119,22 @@ export default function AdminLayout({ children, title, subtitle, actions }) {
             <main className="flex-1 p-4 lg:p-8 max-w-7xl mx-auto w-full">
                 {children}
             </main>
+
+            {/* Footer */}
+            <footer className="w-full border-t border-white/10 bg-[#140b0b]/90 backdrop-blur-md px-4 lg:px-8 py-4 mt-auto">
+                <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-400 font-mono">
+                    <div className="flex items-center space-x-2">
+                        <span className="font-bold text-white tracking-wider uppercase">G-Prime</span>
+                        <span>•</span>
+                        <span>Advanced Academic Center (AAC)</span>
+                        <span className="hidden sm:inline">•</span>
+                        <span className="hidden sm:inline">GRIET</span>
+                        <span>•</span>
+                        <span>© 2026</span>
+                    </div>
+                    <FooterLogos />
+                </div>
+            </footer>
         </div>
     );
 }

@@ -4,3 +4,15 @@ node_modules/
 dist/
 build/
 *.log
+.postgres/
+postgres_data/
+
+# DB dump (contains sensitive data)
+mcq_exam_db_dump.sql
+
+# Temporary extraction folders used for merging upstream branches
+addedfeatures/
+upstream-mcq-extracted/
+
+# Misplaced favicon copy at question-portal root
+question-portal/aac.webp

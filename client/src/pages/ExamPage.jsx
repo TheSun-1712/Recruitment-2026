@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
+import { motion, AnimatePresence } from 'framer-motion';
 import KaTeXRenderer from '../components/KaTeXRenderer';
 import { API_URL, candidateFetch } from '../utils/api';
 import useContestProctoring from '../hooks/useContestProctoring';
+import FooterLogos from '../components/FooterLogos';
 
 export default function ExamPage() {
     const navigate = useNavigate();
@@ -32,7 +34,16 @@ export default function ExamPage() {
         return initial;
     });
 
-    // Initialise from absolute deadline so a page refresh never resets the clock
+    // Track visited questions for 4-tier navigation
+    const [visited, setVisited] = useState(() => {
+        const initial = new Set();
+        if (session?.questions?.[0]?.question_id) {
+            initial.add(session.questions[0].question_id);
+        }
+        return initial;
+    });
+
+    // Initialise from absolute deadline
     const [timeRemaining, setTimeRemaining] = useState(() => {
         if (session?.endTime) {
             const delta = Math.floor((new Date(session.endTime).getTime() - Date.now()) / 1000);
@@ -46,9 +57,6 @@ export default function ExamPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSubmitted, setIsSubmitted] = useState(false);
     const [submitResult, setSubmitResult] = useState(null);
-    const [isDisqualified, setIsDisqualified] = useState(() => {
-        return sessionStorage.getItem('exam_disqualified') === 'true';
-    });
     const [error, setError] = useState(null);
 
     const socketRef = useRef(null);
@@ -63,17 +71,23 @@ export default function ExamPage() {
         }
     }, [session, navigate]);
 
-    // Ensure full screen mode on mount
-    useEffect(() => {
-        if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-            document.documentElement.requestFullscreen().catch(() => {});
-        }
-    }, []);
-
     const isSyncingRef = useRef(false);
     const isExpiredRef = useRef(false);
 
-    // Server-authoritative timer re-sync (BUG-01, BUG-02, BUG-03)
+    // Update visited set on question change
+    const currentQ = questions[currentIndex];
+    useEffect(() => {
+        if (currentQ?.question_id) {
+            setVisited((prev) => {
+                if (prev.has(currentQ.question_id)) return prev;
+                const next = new Set(prev);
+                next.add(currentQ.question_id);
+                return next;
+            });
+        }
+    }, [currentIndex, currentQ?.question_id]);
+
+    // Server-authoritative timer re-sync
     const handleTimeReSync = useCallback(async () => {
         if (isSyncingRef.current || isSubmitted || !session?.jwt) return;
         isSyncingRef.current = true;
@@ -83,7 +97,7 @@ export default function ExamPage() {
                 const data = await res.json();
                 if (data.isSubmitted) {
                     cleanupProctoring();
-                    setSubmitResult({ score: data.score });
+                    setSubmitResult({ score: data.score, total_marks: data.totalMarks });
                     setIsSubmitted(true);
                     sessionStorage.removeItem('examSession');
                     return;
@@ -102,25 +116,7 @@ export default function ExamPage() {
         }
     }, [isSubmitted, session?.jwt]);
 
-    // Disqualification Handler (exceeding 10 violations)
-    const handleDisqualification = useCallback(async () => {
-        setIsDisqualified(true);
-        sessionStorage.setItem('exam_disqualified', 'true');
-        cleanupProctoring();
-
-        // Auto-submit the candidate exam session to freeze responses in backend
-        try {
-            await candidateFetch('/exam/submit', { method: 'POST' });
-        } catch (err) {
-            console.warn('Auto-submit on disqualify error:', err);
-        }
-
-        if (document.fullscreenElement) {
-            document.exitFullscreen().catch(() => {});
-        }
-    }, []);
-
-    // Proctoring Hook (BUG-04)
+    // Proctoring Hook
     const {
         showWarning,
         warningTitle,
@@ -132,19 +128,22 @@ export default function ExamPage() {
         isViolation,
         cleanupProctoring,
     } = useContestProctoring('exam', {
-        contestEnded: isSubmitted || isDisqualified,
+        contestEnded: isSubmitted,
         teamName: session?.candidateName || session?.rollNo || 'Unknown',
         backendUrl: API_URL,
-        onDisqualify: handleDisqualification,
+        onDisqualify: () => {
+            sessionStorage.removeItem('examSession');
+            navigate('/login');
+        },
     });
 
-    // Server re-sync on mount: catches page-refresh without visibilitychange firing
+    // Server re-sync on mount
     useEffect(() => {
         if (session?.jwt) {
             handleTimeReSync();
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []); // intentionally empty — run once on mount
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // WebSocket initialization
     useEffect(() => {
@@ -152,7 +151,7 @@ export default function ExamPage() {
 
         const socket = io(API_URL, {
             transports: ['websocket', 'polling'],
-            auth: { token: session.jwt },  // Required: server reads JWT from handshake.auth.token
+            auth: { token: session.jwt },
         });
         socketRef.current = socket;
 
@@ -176,12 +175,10 @@ export default function ExamPage() {
             handleTimeReSync();
         });
 
-        // extra_time_granted: always re-sync from server; never apply client-side addition
         socket.on('extra_time_granted', () => {
             handleTimeReSync();
         });
 
-        // time_sync from server (tab_active response) — always server-computed
         socket.on('time_sync', ({ timeRemainingSec }) => {
             if (typeof timeRemainingSec === 'number') {
                 setTimeRemaining(timeRemainingSec);
@@ -199,7 +196,6 @@ export default function ExamPage() {
             navigate('/login');
         });
 
-        // Admin force-reopen handler (previously unhandled)
         socket.on('session_reopened', ({ timeRemainingSec }) => {
             isExpiredRef.current = false;
             setIsSubmitted(false);
@@ -211,15 +207,10 @@ export default function ExamPage() {
             handleTimeReSync();
         });
 
-        // Consolidated visibility handler (replaces the duplicate second useEffect)
         function handleVisibilityChange() {
             if (document.hidden) {
-                // Tab switched away: notify server (no client time passed — server computes from end_time)
-                socket.emit('tab_inactive', {
-                    sessionId: session.sessionId,
-                });
+                socket.emit('tab_inactive', { sessionId: session.sessionId });
             } else {
-                // Tab regained focus: notify server and immediately re-sync authoritative time
                 socket.emit('tab_active', { sessionId: session.sessionId });
                 handleTimeReSync();
             }
@@ -233,7 +224,7 @@ export default function ExamPage() {
         };
     }, [session, navigate, handleTimeReSync]);
 
-    // Periodic server-authoritative sync (heartbeat fallback against dropped socket packets)
+    // Periodic heartbeat fallback re-sync
     useEffect(() => {
         if (isSubmitted || !session?.jwt) return;
         const syncInterval = setInterval(() => {
@@ -242,7 +233,7 @@ export default function ExamPage() {
         return () => clearInterval(syncInterval);
     }, [isSubmitted, session?.jwt, handleTimeReSync]);
 
-    // Local countdown ticker — pure display only; server remains the authority
+    // Local countdown ticker
     useEffect(() => {
         if (isPaused || isSubmitted) return;
 
@@ -250,7 +241,6 @@ export default function ExamPage() {
             setTimeRemaining((prev) => {
                 if (prev <= 1) {
                     clearInterval(timerRef.current);
-                    // Guard: only trigger auto-submit once
                     if (!isExpiredRef.current) {
                         isExpiredRef.current = true;
                         handleFinalSubmit();
@@ -271,9 +261,12 @@ export default function ExamPage() {
         return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }, [timeRemaining]);
 
-    const isUrgent = timeRemaining < 300; // < 5 minutes
+    // Timer status tiers
+    const isWarning = timeRemaining <= 600 && timeRemaining > 300; // <= 10m
+    const isCritical = timeRemaining <= 300; // <= 5m
+    const isPulsing = timeRemaining <= 60;   // <= 1m
 
-    // Summary counts for navigator & submit modal
+    // Summary counts
     const summary = useMemo(() => {
         let answered = 0;
         let marked = 0;
@@ -281,83 +274,23 @@ export default function ExamPage() {
             if (answers[q.question_id]) answered++;
             if (marks[q.question_id]) marked++;
         });
-        const total = questions.length || 75;
+        const total = questions.length || 30;
         const unanswered = total - answered;
         return { answered, unanswered, marked, total };
     }, [questions, answers, marks]);
-
-    // Group questions into contiguous sections based on subject_name
-    const sections = useMemo(() => {
-        if (!questions || questions.length === 0) return [];
-        const secList = [];
-        let currentSec = null;
-
-        questions.forEach((q, idx) => {
-            const subName = q.subject_name || 'General';
-            if (!currentSec || currentSec.name !== subName) {
-                currentSec = {
-                    name: subName,
-                    startIndex: idx,
-                    endIndex: idx,
-                    questions: [],
-                };
-                secList.push(currentSec);
-            }
-            currentSec.endIndex = idx;
-            currentSec.questions.push({ ...q, originalIndex: idx });
-        });
-
-        return secList;
-    }, [questions]);
-
-    // Active section derived from currentIndex
-    const currentSection = useMemo(() => {
-        return sections.find((s) => currentIndex >= s.startIndex && currentIndex <= s.endIndex) || sections[0] || null;
-    }, [sections, currentIndex]);
-
-    // Section-wise metrics (answered, marked, total)
-    const sectionMetrics = useMemo(() => {
-        return sections.map((sec) => {
-            let answered = 0;
-            let marked = 0;
-            sec.questions.forEach((q) => {
-                if (answers[q.question_id]) answered++;
-                if (marks[q.question_id]) marked++;
-            });
-            const total = sec.questions.length;
-            const unanswered = total - answered;
-            return {
-                name: sec.name,
-                startIndex: sec.startIndex,
-                endIndex: sec.endIndex,
-                answered,
-                marked,
-                unanswered,
-                total,
-            };
-        });
-    }, [sections, answers, marks]);
-
-    const relativeQuestionNumber = currentSection ? currentIndex - currentSection.startIndex + 1 : currentIndex + 1;
-    const sectionTotalQuestions = currentSection ? currentSection.questions.length : questions.length;
-
-    const currentQ = questions[currentIndex];
 
     // Handle Option Selection
     async function handleSelectOption(opt) {
         if (!currentQ || isSubmitted || isPaused) return;
 
         const currentAnswer = answers[currentQ.question_id];
-        // If clicking the already selected option, unselect (null)
         const nextAnswer = currentAnswer === opt ? null : opt;
 
-        // Optimistic UI update
         setAnswers((prev) => ({
             ...prev,
             [currentQ.question_id]: nextAnswer,
         }));
 
-        // Socket.IO sync
         if (socketRef.current?.connected) {
             socketRef.current.emit('answer_sync', {
                 candidateId: session.candidateId,
@@ -366,14 +299,10 @@ export default function ExamPage() {
             });
         }
 
-        // REST fallback (with 401 interception)
         try {
             await candidateFetch('/exam/answer', {
                 method: 'POST',
-                body: JSON.stringify({
-                    questionId: currentQ.question_id,
-                    selectedOpt: nextAnswer,
-                }),
+                body: JSON.stringify({ questionId: currentQ.question_id, selectedOpt: nextAnswer }),
             });
         } catch (err) {
             console.error('Answer REST sync error:', err);
@@ -386,13 +315,11 @@ export default function ExamPage() {
 
         const nextMark = !marks[currentQ.question_id];
 
-        // Optimistic UI update
         setMarks((prev) => ({
             ...prev,
             [currentQ.question_id]: nextMark,
         }));
 
-        // Socket.IO sync
         if (socketRef.current?.connected) {
             socketRef.current.emit('mark_sync', {
                 candidateId: session.candidateId,
@@ -401,7 +328,6 @@ export default function ExamPage() {
             });
         }
 
-        // REST fallback (with 401 interception)
         try {
             await candidateFetch('/exam/mark', {
                 method: 'POST',
@@ -412,7 +338,7 @@ export default function ExamPage() {
         }
     }
 
-    // Final Exam Submit (Idempotent & Graceful)
+    // Final Exam Submit
     async function handleFinalSubmit() {
         if (isSubmitting || isSubmitted) return;
         setIsSubmitting(true);
@@ -434,649 +360,682 @@ export default function ExamPage() {
             setShowSubmitModal(false);
             sessionStorage.removeItem('examSession');
         } catch (err) {
-            // If already submitted in DB (e.g. via admin auto-submit), gracefully finalize
             if (err.message && err.message.includes('already been submitted')) {
                 cleanupProctoring();
                 setIsSubmitted(true);
                 setShowSubmitModal(false);
                 sessionStorage.removeItem('examSession');
             } else {
-                setError(err.message || 'Failed to submit exam. Please notify invigilator.');
+                setError(err.message || 'Failed to submit exam. Please notify your invigilator.');
                 setIsSubmitting(false);
             }
         }
     }
 
-    // Disqualified Screen (Triggered automatically upon reaching 10 violations)
-    if (isDisqualified) {
-        return (
-            <div className="min-h-screen bg-[#0d0707] text-[#fbe9e7] flex items-center justify-center p-4 font-sans selection:bg-red-500 selection:text-white">
-                <div className="max-w-md w-full bg-[#180a0a] border border-red-500/50 rounded-2xl p-8 text-center shadow-2xl space-y-6 relative overflow-hidden">
-                    <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-64 h-32 bg-red-600/20 blur-3xl rounded-full pointer-events-none" />
+    // Keyboard Navigation
+    useEffect(() => {
+        if (isSubmitted || isPaused || showSubmitModal) return;
 
-                    <div className="w-20 h-20 rounded-2xl bg-red-500/20 border border-red-500/50 text-red-400 flex items-center justify-center mx-auto shadow-xl shadow-red-500/20">
-                        <span className="material-symbols-outlined text-5xl">gpp_bad</span>
-                    </div>
+        function handleKeyDown(e) {
+            if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
+                return;
+            }
 
-                    <div>
-                        <h2 className="text-2xl font-black text-white tracking-wide uppercase">
-                            Examination Terminated
-                        </h2>
-                        <p className="text-xs text-red-400 font-bold uppercase tracking-wider mt-1">
-                            Disqualified — 10 Violations Exceeded
-                        </p>
-                        <p className="text-xs text-gray-400 mt-2 leading-relaxed">
-                            You have exceeded the maximum threshold of 10 security infractions (such as exiting full screen mode or switching tabs). Your exam session has been automatically submitted and terminated.
-                        </p>
-                    </div>
+            const key = e.key.toUpperCase();
+            if (['A', 'B', 'C', 'D'].includes(key)) {
+                e.preventDefault();
+                handleSelectOption(key.toLowerCase());
+            } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                setCurrentIndex((prev) => Math.max(0, prev - 1));
+            } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                setCurrentIndex((prev) => Math.min(questions.length - 1, prev + 1));
+            } else if (key === 'M') {
+                e.preventDefault();
+                handleToggleMark();
+            }
+        }
 
-                    <div className="p-4 bg-[#120707] border border-red-500/20 rounded-xl text-left text-xs space-y-2 font-mono">
-                        <div className="flex justify-between">
-                            <span className="text-gray-400">Candidate:</span>
-                            <span className="text-white font-bold">{session?.candidateName || 'Candidate'}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-gray-400">Roll Number:</span>
-                            <span className="text-red-400 font-bold">{session?.rollNo || '-'}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-gray-400">Branch & Sec:</span>
-                            <span className="text-gray-300">{session?.branch} - {session?.section}</span>
-                        </div>
-                        <div className="flex justify-between pt-2 border-t border-red-500/20 text-sm">
-                            <span className="text-gray-300 font-bold">Total Violations:</span>
-                            <span className="text-red-400 font-black">10 / 10 (LIMIT EXCEEDED)</span>
-                        </div>
-                        <div className="flex justify-between text-xs">
-                            <span className="text-gray-400">Status:</span>
-                            <span className="text-red-400 font-black uppercase">DISQUALIFIED</span>
-                        </div>
-                    </div>
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isSubmitted, isPaused, showSubmitModal, currentQ, answers, marks, questions.length]);
 
-                    <div className="text-[11px] text-gray-500">
-                        Please contact your examination hall invigilator immediately.
-                    </div>
-
-                    <button
-                        onClick={() => {
-                            sessionStorage.removeItem('examSession');
-                            sessionStorage.removeItem('exam_disqualified');
-                            navigate('/login');
-                        }}
-                        className="w-full py-3.5 bg-white/10 hover:bg-white/15 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition cursor-pointer"
-                    >
-                        Return to Portal
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
-    // Completed Screen
+    // ═══════════════════════════════════════════════
+    //  COMPLETED SCREEN
+    // ═══════════════════════════════════════════════
     if (isSubmitted) {
         return (
-            <div className="min-h-screen bg-[#0d0707] text-[#fbe9e7] flex items-center justify-center p-4 font-sans selection:bg-orange-500 selection:text-white">
-                <div className="max-w-md w-full bg-[#140b0b] border border-green-500/40 rounded-2xl p-8 text-center shadow-2xl space-y-6 relative overflow-hidden">
-                    <div className="w-16 h-16 rounded-2xl bg-green-500/20 border border-green-500/40 text-green-400 flex items-center justify-center mx-auto shadow-lg shadow-green-500/20">
-                        <span className="material-symbols-outlined text-4xl">task_alt</span>
+            <div className="min-h-screen bg-[#122027] text-white flex items-center justify-center p-6 font-sans selection:bg-[#E76F51] selection:text-white relative overflow-hidden bg-tech-grid">
+                {/* Ambient glow */}
+                <div className="fixed inset-0 pointer-events-none overflow-hidden">
+                    <div className="absolute top-1/4 left-1/3 w-96 h-96 bg-[#2A9D8F]/20 rounded-full blur-3xl" />
+                    <div className="absolute bottom-1/4 right-1/3 w-96 h-96 bg-[#E76F51]/15 rounded-full blur-3xl" />
+                </div>
+
+                <div className="max-w-md w-full bg-[#1B313B]/90 backdrop-blur-xl border border-[rgba(42,157,143,0.35)] rounded-2xl p-8 sm:p-10 text-center shadow-2xl space-y-6 relative overflow-hidden z-10">
+                    <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#2A9D8F] via-[#E9C46A] to-[#E76F51]" />
+
+                    {/* Animated Checkmark */}
+                    <div className="w-20 h-20 rounded-2xl bg-[#2A9D8F]/15 border border-[#2A9D8F]/40 flex items-center justify-center mx-auto shadow-[0_0_25px_rgba(42,157,143,0.25)]">
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+                            <path
+                                d="M5 13l4 4L19 7"
+                                stroke="#2A9D8F"
+                                strokeWidth="2.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeDasharray="24"
+                                style={{ animation: 'check-draw 0.6s ease-out both' }}
+                            />
+                        </svg>
                     </div>
 
-                    <div>
-                        <h2 className="text-2xl font-black text-white">Examination Submitted</h2>
-                        <p className="text-xs text-gray-400 mt-1">
-                            Your responses have been successfully evaluated and securely persisted.
+                    <div className="space-y-2">
+                        <span className="inline-block px-4 py-1.5 bg-[#2A9D8F]/15 text-[#2A9D8F] border border-[#2A9D8F]/30 rounded-full text-xs font-mono font-bold tracking-[0.2em] uppercase">
+                            SUBMISSION COMPLETE
+                        </span>
+                        <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
+                            Exam Submitted
+                        </h1>
+                        <p className="text-sm text-[#9CB6BF] leading-relaxed max-w-xs mx-auto">
+                            Thank you! Your responses have been submitted successfully.
                         </p>
                     </div>
 
-                    <div className="p-4 bg-[#180d0d] border border-white/10 rounded-xl text-left text-xs space-y-2 font-mono">
-                        <div className="flex justify-between">
-                            <span className="text-gray-400">Candidate:</span>
-                            <span className="text-white font-bold">{session?.candidateName}</span>
+                    <div className="w-24 h-[1px] bg-[rgba(42,157,143,0.3)] mx-auto" />
+
+                    <div className="text-sm font-mono text-[#9CB6BF] space-y-1.5">
+                        <div className="font-bold text-white uppercase text-base">AAC Entrance Test • 2026</div>
+                        <div>
+                            {session?.candidateName || 'Candidate'} {session?.rollNo ? `(${session.rollNo})` : ''}
                         </div>
-                        <div className="flex justify-between">
-                            <span className="text-gray-400">Roll Number:</span>
-                            <span className="text-orange-400 font-bold">{session?.rollNo}</span>
+                        <div className="text-xs text-[#9CB6BF]/80">
+                            {session?.branch || 'Dept'} • {session?.shiftName || 'Standard Session'}
                         </div>
-                        <div className="flex justify-between">
-                            <span className="text-gray-400">Branch & Sec:</span>
-                            <span className="text-gray-300">{session?.branch} - {session?.section}</span>
-                        </div>
-                        {submitResult?.score !== undefined && (
-                            <div className="flex justify-between pt-2 border-t border-white/10 text-sm">
-                                <span className="text-gray-300 font-bold">Total Score:</span>
-                                <span className="text-green-400 font-black">{submitResult.score} / {summary.total}</span>
-                            </div>
-                        )}
+                    </div>
+
+                    <div className="py-4 px-5 bg-[#122027]/80 border border-[rgba(42,157,143,0.25)] rounded-xl text-sm font-mono text-[#9CB6BF]">
+                        Your exam is complete.
+                        <div className="font-bold text-white mt-0.5">Thank you for participating. All the best!</div>
                     </div>
 
                     <button
                         onClick={() => navigate('/login')}
-                        className="w-full py-3.5 bg-white/10 hover:bg-white/15 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition"
+                        className="w-full py-3.5 bg-[#162932] hover:bg-[#264653] text-white font-bold text-sm uppercase tracking-widest rounded-xl border border-[rgba(42,157,143,0.3)] transition-colors duration-150 cursor-pointer"
                     >
                         Return to Portal
                     </button>
+                </div>
+
+                {/* Bottom Right Footer Logos */}
+                <div className="absolute bottom-4 right-6 flex items-center gap-3 z-20">
+                    <FooterLogos size="small" />
                 </div>
             </div>
         );
     }
 
+    // ═══════════════════════════════════════════════
+    //  ACTIVE EXAM VIEW
+    // ═══════════════════════════════════════════════
     return (
-        <div className="min-h-screen bg-[#0d0707] text-[#fbe9e7] flex flex-col font-sans selection:bg-orange-500 selection:text-white select-none">
-            {/* Proctoring Security Warning Overlay */}
-            {showWarning && (
-                <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className={`bg-[#1c0a0a] border rounded-2xl max-w-md w-full p-8 shadow-2xl text-center space-y-5 ${isViolation ? 'border-red-500/50' : 'border-red-700/70'}`}>
-                        <span className="material-symbols-outlined text-5xl text-red-400">{isViolation ? 'security' : 'gpp_bad'}</span>
-                        <h2 className="text-xl font-black text-white">{warningTitle || 'Security Alert'}</h2>
-                        <p className="text-sm text-gray-300 leading-relaxed">{warningMessage}</p>
-                        {isViolation && violationCount > 0 && (
-                            <div className="inline-block px-3 py-1 bg-red-900/40 border border-red-500/30 rounded-full text-xs font-mono text-red-300">
-                                Violations: {violationCount} / {maxViolations}
-                            </div>
-                        )}
-                        <button
-                            onClick={warningAction}
-                            className="w-full py-3.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition cursor-pointer"
+        <div className="min-h-screen bg-[#122027] text-white flex flex-col font-sans selection:bg-[#E76F51] selection:text-white select-none relative bg-tech-grid">
+
+            {/* ═══ Vibrant Ambient Glow Background ═══ */}
+            <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+                <div className="absolute -top-32 left-1/4 w-[30rem] h-[30rem] bg-[#264653]/35 rounded-full blur-3xl" />
+                <div className="absolute top-1/2 -right-20 w-[28rem] h-[28rem] bg-[#E76F51]/12 rounded-full blur-3xl" />
+                <div className="absolute -bottom-20 left-1/3 w-96 h-96 bg-[#2A9D8F]/20 rounded-full blur-3xl" />
+            </div>
+
+            {/* ── Proctoring Warning Overlay ── */}
+            <AnimatePresence>
+                {showWarning && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
+                    >
+                        <div
+                            className={`bg-[#1B313B] border-2 rounded-2xl max-w-md w-full p-8 shadow-2xl text-center space-y-5 relative overflow-hidden ${isViolation ? 'border-[#E76F51]' : 'border-[#E9C46A]'
+                                }`}
                         >
-                            {warningButtonText}
-                        </button>
-                    </div>
-                </div>
-            )}
+                            <div className={`absolute top-0 left-0 right-0 h-1 ${isViolation ? 'bg-[#E76F51]' : 'bg-[#E9C46A]'}`} />
+                            <div className={`w-16 h-16 rounded-2xl mx-auto flex items-center justify-center font-mono font-bold text-2xl ${isViolation ? 'bg-[#E76F51]/20 text-[#E76F51]' : 'bg-[#E9C46A]/20 text-[#E9C46A]'
+                                }`}>
+                                ⚠
+                            </div>
+                            <h2 className="text-2xl font-bold text-white">
+                                {warningTitle || (isViolation ? 'Security Violation Detected' : 'Fullscreen Required')}
+                            </h2>
+                            <p className="text-sm text-[#9CB6BF] leading-relaxed">{warningMessage}</p>
+                            {isViolation && violationCount > 0 && (
+                                <div className="inline-block px-4 py-2 bg-[#E76F51]/15 border border-[#E76F51]/30 rounded-lg text-sm font-mono text-[#E76F51] font-bold">
+                                    Violations: {violationCount}
+                                </div>
+                            )}
+                            <button
+                                onClick={warningAction}
+                                className={`w-full py-4 text-white font-bold text-sm uppercase tracking-widest rounded-xl transition-colors duration-150 cursor-pointer shadow-lg ${isViolation
+                                    ? 'bg-[#E76F51] hover:bg-[#F4A261]'
+                                    : 'bg-[#E76F51] hover:bg-[#F4A261]'
+                                    }`}
+                            >
+                                {warningButtonText}
+                            </button>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
-            {/* Top Navigation Bar */}
-            <header className="sticky top-0 z-40 bg-[#140b0b]/95 backdrop-blur-md border-b border-white/10 px-4 lg:px-6 py-2.5 flex items-center justify-between">
-                {/* Candidate Info */}
+            {/* ── Sticky Top Header ── */}
+            <header className="sticky top-0 z-30 bg-[#162932]/90 backdrop-blur-md border-b border-[rgba(42,157,143,0.25)] px-4 sm:px-8 py-3 flex items-center justify-between shadow-lg">
+                {/* Left: Brand + Candidate Info */}
                 <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-orange-600 to-amber-500 flex items-center justify-center font-black text-white text-base shadow-md shadow-orange-600/20">
-                        G
-                    </div>
-                    <div>
-                        <div className="text-xs font-black text-white tracking-wide uppercase flex items-center space-x-1.5">
+                    <span className="font-mono text-xs font-bold tracking-widest px-2.5 py-1.5 bg-gradient-to-r from-[#E76F51] to-[#F4A261] text-white rounded-md flex items-center gap-1.5 shadow-[0_0_12px_rgba(231,111,81,0.3)]">
+                        <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+                        <span>AAC</span>
+                    </span>
+                    <div className="hidden md:block">
+                        <div className="text-xs font-bold text-white tracking-wide uppercase flex items-center space-x-1.5 font-mono">
                             <span>{session?.candidateName || 'Candidate'}</span>
-                            <span className="text-orange-400 font-mono text-[11px] font-bold">({session?.rollNo})</span>
+                            <span className="text-[#9CB6BF]">({session?.rollNo || 'ID'})</span>
                         </div>
-                        <div className="text-[10px] text-gray-400">
-                            {session?.branch}-{session?.section} • {session?.shiftName || 'Shift'}
+                        <div className="text-[10px] text-[#9CB6BF] font-mono">
+                            {session?.branch || 'Dept'} • {session?.shiftName || 'Shift'}
                         </div>
                     </div>
                 </div>
 
-                {/* Center / Right: Countdown Timer & Submit Button */}
+                {/* Center: Question Position */}
+                <div className="font-mono text-xs font-bold tracking-wider text-white uppercase px-3 py-1.5 bg-[#1B313B] rounded-lg border border-[rgba(42,157,143,0.3)]">
+                    Question <span className="text-[#E9C46A] font-extrabold">{currentIndex + 1}</span> <span className="text-[#9CB6BF] font-normal">of {summary.total}</span>
+                </div>
+
+                {/* Right: Timer + Submit */}
                 <div className="flex items-center space-x-3">
                     {/* Timer */}
-                    <div className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl border font-mono font-black text-base sm:text-lg transition ${
-                        isUrgent
-                            ? 'bg-red-500/15 border-red-500/50 text-red-400 animate-pulse'
-                            : 'bg-white/5 border-white/10 text-white'
-                    }`}>
-                        <span className="material-symbols-outlined text-[18px]">timer</span>
-                        <span>{timerDisplay}</span>
+                    <div className={`flex flex-col items-end px-4 py-1.5 rounded-lg border transition-colors duration-300 ${isCritical
+                        ? 'bg-[#E76F51]/20 border-[#E76F51]/50 text-[#E76F51] animate-pulse-critical'
+                        : isWarning
+                            ? 'bg-[#E9C46A]/20 border-[#E9C46A]/50 text-[#E9C46A]'
+                            : 'bg-[#1B313B] border-[rgba(42,157,143,0.3)] text-white'
+                        }`}>
+                        <span className="text-[9px] font-mono tracking-widest uppercase font-bold text-[#9CB6BF]">
+                            Time Left
+                        </span>
+                        <span className="font-mono font-extrabold text-base sm:text-lg leading-tight">
+                            {timerDisplay}
+                        </span>
                     </div>
 
-                    {/* Mobile Drawer Toggle */}
+                    {/* Mobile Grid Toggle */}
                     <button
                         onClick={() => setShowMobileDrawer(!showMobileDrawer)}
-                        className="xl:hidden p-2 rounded-xl bg-white/5 border border-white/10 text-gray-300 hover:text-white flex items-center"
+                        className="xl:hidden px-3 py-2 rounded-lg bg-[#1B313B] border border-[rgba(42,157,143,0.3)] text-white text-xs font-mono font-bold hover:bg-[#264653] transition cursor-pointer"
                         title="Toggle Navigator"
                     >
-                        <span className="material-symbols-outlined text-[20px]">grid_view</span>
+                        Grid
                     </button>
 
-                    {/* Submit Button */}
+                    {/* Submit Button (Header) */}
                     <button
                         onClick={() => setShowSubmitModal(true)}
-                        className="hidden sm:flex px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-md shadow-orange-600/20 transition items-center space-x-1"
+                        className="hidden sm:inline-flex px-5 py-2 bg-[#E76F51] hover:bg-[#F4A261] text-white font-bold text-xs uppercase tracking-widest rounded-lg shadow-md transition-colors duration-150 cursor-pointer"
                     >
-                        <span className="material-symbols-outlined text-[16px]">send</span>
-                        <span>Submit</span>
+                        Submit Exam
                     </button>
                 </div>
             </header>
 
-            {/* Shift Paused Overlay Banner */}
+            {/* ── Paused Banner ── */}
             {isPaused && (
-                <div className="bg-amber-600/90 text-black px-4 py-2 text-center text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-2 shadow-lg">
-                    <span className="material-symbols-outlined text-[18px]">pause_circle</span>
-                    <span>Shift Paused by Invigilator — Timer Frozen</span>
+                <div className="bg-[#E9C46A] text-[#122027] px-4 py-2 text-center text-xs font-mono font-bold tracking-wider uppercase flex items-center justify-center space-x-2 border-b border-[#E9C46A]/80">
+                    <span className="w-2 h-2 rounded-full bg-[#122027] animate-ping" />
+                    <span>PAUSED • Shift Temporarily Suspended by Invigilator — Timer Frozen</span>
                 </div>
             )}
 
-            {/* Main Exam Grid */}
-            <div className="flex-1 max-w-7xl mx-auto w-full p-4 lg:p-6 grid grid-cols-1 xl:grid-cols-12 gap-6">
-                {/* Left Area: Active Question Card */}
-                <main className="xl:col-span-8 flex flex-col justify-between space-y-4">
-                    {/* Section Navigation Tabs */}
-                    {sections.length > 0 && (
-                        <div className="bg-[#140b0b] border border-white/10 rounded-2xl p-2 sm:p-2.5 flex items-center space-x-2 overflow-x-auto scrollbar-none shadow-lg">
-                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-2 shrink-0 hidden md:inline">
-                                Sections:
-                            </span>
-                            {sectionMetrics.map((sec) => {
-                                const isActive = currentSection?.name === sec.name;
-                                return (
-                                    <button
-                                        key={sec.name}
-                                        type="button"
-                                        onClick={() => setCurrentIndex(sec.startIndex)}
-                                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 shrink-0 border ${
-                                            isActive
-                                                ? 'bg-orange-600 text-white border-orange-500 shadow-md shadow-orange-600/30'
-                                                : 'bg-[#180d0d] border-white/10 text-gray-300 hover:text-white hover:border-white/20'
-                                        }`}
-                                    >
-                                        <span className="truncate">{sec.name}</span>
-                                        <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono ${
-                                            isActive ? 'bg-black/30 text-orange-200 font-bold' : 'bg-white/5 text-gray-400'
-                                        }`}>
-                                            {sec.answered}/{sec.total}
-                                        </span>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    )}
+            {/* ── Main Exam Grid (with pb-32 so bottom dock never overlaps content) ── */}
+            <div className="flex-1 max-w-7xl mx-auto w-full p-4 sm:p-6 lg:p-8 pb-32 grid grid-cols-1 xl:grid-cols-12 gap-6 items-start relative z-10">
 
-                    {currentQ ? (
-                        <div className="bg-[#140b0b] border border-white/10 rounded-2xl p-5 sm:p-7 shadow-xl flex flex-col justify-between flex-1">
-                            <div>
-                                {/* Question Metadata Bar */}
-                                <div className="flex flex-wrap items-center justify-between gap-2 pb-4 mb-4 border-b border-white/5 text-xs">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <span className="px-2.5 py-1 rounded-lg bg-orange-600 text-white font-black text-xs">
-                                            Q {currentQ.position} / {summary.total}
-                                        </span>
-                                        <span className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-orange-400 font-bold text-xs">
-                                            {currentQ.subject_name} • {relativeQuestionNumber} of {sectionTotalQuestions}
-                                        </span>
-                                        <span className="text-gray-400 font-medium">({currentQ.topic_name})</span>
-                                    </div>
-
-                                    <div className="flex items-center space-x-2">
-                                        <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
-                                            currentQ.difficulty === 'easy' ? 'bg-green-500/20 text-green-400' :
-                                            currentQ.difficulty === 'medium' ? 'bg-amber-500/20 text-amber-400' :
-                                            'bg-red-500/20 text-red-400'
-                                        }`}>
-                                            {currentQ.difficulty}
-                                        </span>
-                                        {marks[currentQ.question_id] && (
-                                            <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 text-[10px] font-bold flex items-center space-x-1">
-                                                <span className="material-symbols-outlined text-[12px]">bookmark</span>
-                                                <span>Marked</span>
+                {/* ── Left: Question Card ── */}
+                <main className="xl:col-span-8 flex flex-col space-y-5">
+                    <AnimatePresence mode="wait">
+                        {currentQ ? (
+                            <div
+                                key={currentQ.question_id}
+                                className="bg-[#1B313B]/90 backdrop-blur-xl border border-[rgba(42,157,143,0.3)] rounded-2xl p-6 sm:p-9 shadow-2xl flex flex-col justify-between min-h-[500px]"
+                            >
+                                <div>
+                                    {/* Question Header */}
+                                    <div className="flex flex-wrap items-baseline justify-between gap-2 pb-4 mb-6 border-b border-[rgba(42,157,143,0.25)]">
+                                        <div className="flex items-center space-x-3">
+                                            <span className="text-xl sm:text-2xl font-extrabold text-white">
+                                                Q{currentQ.position || currentIndex + 1}
                                             </span>
-                                        )}
+                                            {currentQ.subject_name && (
+                                                <span className="text-xs font-mono text-[#2A9D8F] bg-[#2A9D8F]/15 px-3 py-1 rounded-lg border border-[#2A9D8F]/30 flex items-center gap-1.5">
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-[#2A9D8F]" />
+                                                    <span>{currentQ.subject_name}</span>
+                                                    {currentQ.topic_name ? <span className="text-[#9CB6BF]">• {currentQ.topic_name}</span> : null}
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        <div className="flex items-center space-x-2 text-xs font-mono">
+                                            {currentQ.marks !== undefined && (
+                                                <span className="px-2.5 py-1 bg-[#162932] border border-[rgba(42,157,143,0.25)] rounded-md text-[#9CB6BF] font-semibold">
+                                                    +{currentQ.marks || 1} / -{currentQ.negative_marks || 0}
+                                                </span>
+                                            )}
+                                            {marks[currentQ.question_id] && (
+                                                <span className="px-2.5 py-1 rounded-md bg-[#E9C46A]/20 text-[#E9C46A] border border-[#E9C46A]/50 font-bold">
+                                                    ★ Marked
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
 
-                                {/* Question Body with KaTeX */}
-                                <div className="text-base sm:text-lg text-white font-normal leading-relaxed mb-6">
-                                    <KaTeXRenderer text={currentQ.body} />
-                                </div>
-
-                                {/* Optional Illustration Image */}
-                                {currentQ.image_url && (
-                                    <div className="mb-6 flex justify-center">
-                                        <img
-                                            src={currentQ.image_url.startsWith('http') ? currentQ.image_url : `${API_URL}${currentQ.image_url}`}
-                                            alt="Question illustration"
-                                            className="max-h-64 rounded-xl border border-white/10 shadow-lg object-contain"
-                                        />
+                                    {/* Question Body */}
+                                    <div className="text-lg sm:text-[20px] text-white font-normal leading-[1.7] mb-8">
+                                        <KaTeXRenderer text={currentQ.body} />
                                     </div>
-                                )}
 
-                                {/* MCQ 4 Options */}
-                                <div className="space-y-3">
-                                    {['A', 'B', 'C', 'D'].map((opt) => {
-                                        const optKey = opt.toLowerCase();
-                                        const optText = currentQ[`option_${optKey}`];
-                                        const isSelected = answers[currentQ.question_id] === optKey;
+                                    {/* Optional Image */}
+                                    {currentQ.image_url && (
+                                        <div className="mb-8 flex justify-center">
+                                            <img
+                                                src={currentQ.image_url.startsWith('http') ? currentQ.image_url : `${API_URL}${currentQ.image_url}`}
+                                                alt="Question illustration"
+                                                className="max-h-72 rounded-xl border border-[rgba(42,157,143,0.3)] object-contain bg-[#122027] p-3 shadow-md"
+                                            />
+                                        </div>
+                                    )}
 
-                                        return (
-                                            <button
-                                                key={opt}
-                                                type="button"
-                                                onClick={() => handleSelectOption(optKey)}
-                                                disabled={isPaused}
-                                                className={`w-full min-h-[48px] p-4 rounded-xl border text-left text-sm sm:text-base flex items-start space-x-3 transition active:scale-[0.99] ${
-                                                    isSelected
-                                                        ? 'bg-orange-600/15 border-orange-500 text-white shadow-lg shadow-orange-600/10'
-                                                        : 'bg-[#180d0d] border-white/10 text-gray-300 hover:border-white/25 hover:bg-white/[0.02]'
-                                                }`}
-                                            >
-                                                <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5 border ${
-                                                    isSelected
-                                                        ? 'bg-orange-600 text-white border-orange-500'
-                                                        : 'border-white/20 text-gray-400'
-                                                }`}>
-                                                    {opt}
-                                                </div>
-                                                <div className="flex-1 leading-relaxed">
-                                                    <KaTeXRenderer text={optText || ''} />
-                                                    {currentQ[`opt_${optKey}_image_url`] && (
-                                                        <div className="mt-3">
-                                                            <img
-                                                                src={currentQ[`opt_${optKey}_image_url`].startsWith('http') ? currentQ[`opt_${optKey}_image_url`] : `${API_URL}${currentQ[`opt_${optKey}_image_url`]}`}
-                                                                alt={`Option ${opt} image`}
-                                                                className="max-h-32 rounded-lg border border-white/10 shadow-sm object-contain"
-                                                            />
-                                                        </div>
+                                    {/* MCQ Options */}
+                                    <div className="space-y-3">
+                                        {['A', 'B', 'C', 'D'].map((opt) => {
+                                            const optKey = opt.toLowerCase();
+                                            const optText = currentQ[`option_${optKey}`];
+                                            const isSelected = answers[currentQ.question_id] === optKey;
+
+                                            return (
+                                                <button
+                                                    key={opt}
+                                                    type="button"
+                                                    onClick={() => handleSelectOption(optKey)}
+                                                    disabled={isPaused}
+                                                    className={`w-full min-h-[58px] p-4 rounded-xl border-2 transition-colors duration-150 flex items-start space-x-3.5 cursor-pointer text-left ${isSelected
+                                                        ? 'bg-[#2A9D8F]/20 border-[#2A9D8F] text-white shadow-[0_0_15px_rgba(42,157,143,0.25)]'
+                                                        : 'bg-[#122027]/70 border-[rgba(42,157,143,0.2)] text-[#9CB6BF] hover:bg-[#162932] hover:border-[rgba(42,157,143,0.4)]'
+                                                        }`}
+                                                >
+                                                    {/* Option Badge */}
+                                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-mono font-bold text-sm shrink-0 mt-0.5 border-2 transition-colors duration-150 ${isSelected
+                                                        ? 'bg-[#2A9D8F] text-white border-[#2A9D8F]'
+                                                        : 'border-[rgba(42,157,143,0.3)] bg-[#1B313B] text-[#9CB6BF]'
+                                                        }`}>
+                                                        {opt}
+                                                    </div>
+
+                                                    {/* Option Text */}
+                                                    <div className="flex-1 text-base leading-relaxed text-white">
+                                                        <KaTeXRenderer text={optText || ''} />
+                                                    </div>
+
+                                                    {/* Checkmark when selected */}
+                                                    {isSelected && (
+                                                        <span className="w-6 h-6 rounded-full bg-[#2A9D8F] text-white flex items-center justify-center font-bold text-xs font-mono mt-0.5 shrink-0">
+                                                            ✓
+                                                        </span>
                                                     )}
-                                                </div>
-                                            </button>
-                                        );
-                                    })}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+
+                                    {/* Keyboard Hints */}
+                                    <div className="mt-6 flex items-center justify-between text-[11px] font-mono text-[#9CB6BF] pt-3 border-t border-[rgba(42,157,143,0.25)]">
+                                        <div className="flex items-center space-x-2">
+                                            <span>Keys:</span>
+                                            {['A', 'B', 'C', 'D'].map((k) => (
+                                                <span key={k} className="px-1.5 py-0.5 bg-[#162932] border border-[rgba(42,157,143,0.3)] rounded text-white font-bold text-[10px]">
+                                                    {k}
+                                                </span>
+                                            ))}
+                                            <span>to answer</span>
+                                        </div>
+                                        <div className="hidden sm:flex items-center space-x-3">
+                                            <span>[← / →] Navigate</span>
+                                            <span className="text-[rgba(42,157,143,0.4)]">•</span>
+                                            <span>[M] Mark</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-
-                            {/* Bottom Question Controls */}
-                            <div className="flex items-center justify-between pt-6 mt-6 border-t border-white/5 gap-2">
-                                <button
-                                    onClick={() => setCurrentIndex((prev) => Math.max(0, prev - 1))}
-                                    disabled={currentIndex === 0}
-                                    className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-semibold text-gray-300 hover:text-white transition flex items-center space-x-1.5 disabled:opacity-30"
-                                >
-                                    <span className="material-symbols-outlined text-[16px]">arrow_back</span>
-                                    <span>Previous</span>
-                                </button>
-
-                                <button
-                                    onClick={handleToggleMark}
-                                    className={`px-4 py-2.5 rounded-xl border text-xs font-semibold transition flex items-center space-x-1.5 ${
-                                        marks[currentQ.question_id]
-                                            ? 'bg-purple-600/20 border-purple-500 text-purple-300'
-                                            : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
-                                    }`}
-                                >
-                                    <span className="material-symbols-outlined text-[16px]">
-                                        {marks[currentQ.question_id] ? 'bookmark_added' : 'bookmark_add'}
-                                    </span>
-                                    <span>{marks[currentQ.question_id] ? 'Marked' : 'Mark for Review'}</span>
-                                </button>
-
-                                <button
-                                    onClick={() => setCurrentIndex((prev) => Math.min(questions.length - 1, prev + 1))}
-                                    disabled={currentIndex === questions.length - 1}
-                                    className="px-5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold text-white transition flex items-center space-x-1.5 disabled:opacity-30"
-                                >
-                                    <span>Next</span>
-                                    <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-                                </button>
+                        ) : (
+                            <div className="py-24 text-center text-[#9CB6BF] font-mono bg-[#1B313B]/80 border border-[rgba(42,157,143,0.25)] rounded-2xl">
+                                No questions loaded in this assessment session.
                             </div>
-                        </div>
-                    ) : (
-                        <div className="py-24 text-center text-gray-500">
-                            No questions available.
-                        </div>
-                    )}
+                        )}
+                    </AnimatePresence>
 
-                    {/* Mobile Bottom Submit Button */}
+                    {/* Mobile Submit in content flow */}
                     <div className="sm:hidden">
                         <button
                             onClick={() => setShowSubmitModal(true)}
-                            className="w-full py-3.5 bg-gradient-to-r from-orange-600 to-amber-600 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-orange-600/20 flex items-center justify-center space-x-2"
+                            className="w-full py-3.5 bg-[#E76F51] hover:bg-[#F4A261] text-white font-bold text-sm uppercase tracking-widest rounded-xl shadow-lg flex items-center justify-center space-x-2 cursor-pointer"
                         >
-                            <span className="material-symbols-outlined text-[18px]">send</span>
                             <span>Submit Examination</span>
                         </button>
                     </div>
                 </main>
 
-                {/* Right Area: Desktop Question Navigator (Hidden on mobile) */}
+                {/* ── Right: Question Navigator Sidebar ── */}
                 <aside className="hidden xl:flex xl:col-span-4 flex-col space-y-4">
-                    <div className="bg-[#140b0b] border border-white/10 rounded-2xl p-5 shadow-xl flex flex-col justify-between h-full">
+                    <div className="bg-[#1B313B]/90 backdrop-blur-xl border border-[rgba(42,157,143,0.3)] rounded-2xl p-6 shadow-2xl flex flex-col justify-between">
                         <div>
-                            {/* Navigator Header */}
-                            <div className="flex items-center justify-between pb-3 mb-4 border-b border-white/5">
-                                <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-                                    Question Navigator
-                                </h3>
-                                <span className="text-[11px] text-gray-400 font-mono">
-                                    {summary.answered} / {summary.total} Answered
+                            {/* Header */}
+                            <div className="flex items-baseline justify-between pb-3 mb-4 border-b border-[rgba(42,157,143,0.25)]">
+                                <h2 className="text-sm font-mono font-bold text-white uppercase tracking-widest">
+                                    Navigator
+                                </h2>
+                                <span className="text-sm font-mono text-[#E9C46A] font-bold">
+                                    {summary.answered} / {summary.total}
                                 </span>
                             </div>
 
                             {/* Legend */}
-                            <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-400 mb-4 pb-3 border-b border-white/5">
-                                <div className="flex items-center space-x-1.5">
-                                    <span className="w-3 h-3 rounded bg-green-500/20 border border-green-500/50" />
-                                    <span>Answered ({summary.answered})</span>
+                            <div className="grid grid-cols-2 gap-2 text-xs font-mono text-[#9CB6BF] mb-5 pb-4 border-b border-[rgba(42,157,143,0.25)]">
+                                <div className="flex items-center space-x-2">
+                                    <span className="w-3.5 h-3.5 rounded bg-[#2A9D8F] shrink-0" />
+                                    <span>Attempted ({summary.answered})</span>
                                 </div>
-                                <div className="flex items-center space-x-1.5">
-                                    <span className="w-3 h-3 rounded bg-purple-500/20 border border-purple-500/50" />
-                                    <span>Review ({summary.marked})</span>
+                                <div className="flex items-center space-x-2">
+                                    <span className="w-3.5 h-3.5 rounded bg-[#E9C46A] shrink-0" />
+                                    <span>Marked ({summary.marked})</span>
                                 </div>
-                                <div className="flex items-center space-x-1.5">
-                                    <span className="w-3 h-3 rounded bg-[#180d0d] border border-white/10" />
-                                    <span>Unanswered ({summary.unanswered})</span>
+                                <div className="flex items-center space-x-2">
+                                    <span className="w-3.5 h-3.5 rounded bg-[#264653] shrink-0" />
+                                    <span>Visited</span>
                                 </div>
-                                <div className="flex items-center space-x-1.5">
-                                    <span className="w-3 h-3 rounded border-2 border-orange-500" />
-                                    <span>Current</span>
+                                <div className="flex items-center space-x-2">
+                                    <span className="w-3.5 h-3.5 rounded bg-[#122027] border border-[rgba(42,157,143,0.3)] shrink-0" />
+                                    <span>Unvisited ({summary.unanswered})</span>
                                 </div>
                             </div>
 
-                            {/* Section-Grouped Question Grid */}
-                            <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-1">
-                                {sections.map((sec) => {
-                                    const secAnsCount = sec.questions.filter((q) => answers[q.question_id]).length;
-                                    const isCurrentSec = currentSection?.name === sec.name;
+                            {/* Question Grid */}
+                            <div className="grid grid-cols-5 gap-2 max-h-[48vh] overflow-y-auto pr-1">
+                                {questions.map((q, idx) => {
+                                    const isAnswered = Boolean(answers[q.question_id]);
+                                    const isMarked = Boolean(marks[q.question_id]);
+                                    const isVisited = visited.has(q.question_id);
+                                    const isCurrent = idx === currentIndex;
+
+                                    let cellClasses = 'bg-[#122027]/80 text-[#9CB6BF] border-[rgba(42,157,143,0.2)] hover:bg-[#162932] hover:text-white';
+                                    if (isMarked) {
+                                        cellClasses = 'bg-[#E9C46A] text-[#122027] border-[#E9C46A] font-extrabold shadow-sm';
+                                    } else if (isAnswered) {
+                                        cellClasses = 'bg-[#2A9D8F] text-white border-[#2A9D8F] font-bold shadow-sm';
+                                    } else if (isVisited) {
+                                        cellClasses = 'bg-[#264653] text-white border-[rgba(42,157,143,0.35)] font-medium';
+                                    }
+
+                                    const formattedNum = (idx + 1).toString().padStart(2, '0');
 
                                     return (
-                                        <div key={sec.name} className="space-y-2">
-                                            <div className="flex items-center justify-between text-[11px] font-bold pb-1 border-b border-white/5">
-                                                <span className={`${isCurrentSec ? 'text-orange-400' : 'text-gray-400'} flex items-center space-x-1.5`}>
-                                                    {isCurrentSec && <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />}
-                                                    <span>{sec.name}</span>
-                                                </span>
-                                                <span className="text-[10px] font-mono text-gray-500">
-                                                    {secAnsCount} / {sec.questions.length}
-                                                </span>
-                                            </div>
-
-                                            <div className="grid grid-cols-5 gap-2">
-                                                {sec.questions.map((q) => {
-                                                    const idx = q.originalIndex;
-                                                    const isAnswered = Boolean(answers[q.question_id]);
-                                                    const isMarked = Boolean(marks[q.question_id]);
-                                                    const isCurrent = idx === currentIndex;
-
-                                                    let cellStyle = 'bg-[#180d0d] border-white/10 text-gray-400 hover:border-white/30';
-                                                    if (isMarked) {
-                                                        cellStyle = 'bg-purple-600/20 border-purple-500 text-purple-300 font-bold';
-                                                    } else if (isAnswered) {
-                                                        cellStyle = 'bg-green-600/20 border-green-500 text-green-400 font-bold';
-                                                    }
-
-                                                    return (
-                                                        <button
-                                                            key={q.question_id || idx}
-                                                            onClick={() => setCurrentIndex(idx)}
-                                                            className={`h-9 rounded-lg border text-xs flex items-center justify-center font-mono transition ${cellStyle} ${
-                                                                isCurrent ? 'ring-2 ring-orange-500 ring-offset-2 ring-offset-[#140b0b] !border-orange-500 !text-white' : ''
-                                                            }`}
-                                                        >
-                                                            {q.position || idx + 1}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
+                                        <button
+                                            key={q.question_id || idx}
+                                            onClick={() => setCurrentIndex(idx)}
+                                            className={`h-10 rounded-lg border text-xs sm:text-sm flex items-center justify-center font-mono font-bold transition-colors duration-150 cursor-pointer ${cellClasses} ${isCurrent ? 'ring-2 ring-[#E76F51] !border-[#E76F51] font-extrabold shadow-[0_0_12px_rgba(231,111,81,0.5)]' : ''
+                                                }`}
+                                        >
+                                            {formattedNum}
+                                        </button>
                                     );
                                 })}
                             </div>
                         </div>
 
-                        {/* Submit Button in Sidebar */}
-                        <div className="pt-4 mt-4 border-t border-white/5">
+                        {/* Submit in Sidebar */}
+                        <div className="pt-5 mt-6 border-t border-[rgba(42,157,143,0.25)]">
                             <button
                                 onClick={() => setShowSubmitModal(true)}
-                                className="w-full py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-orange-600/25 transition flex items-center justify-center space-x-2"
+                                className="w-full py-3.5 bg-[#E76F51] hover:bg-[#F4A261] text-white font-bold text-sm uppercase tracking-widest rounded-xl shadow-lg transition-colors duration-150 cursor-pointer flex items-center justify-center space-x-2"
                             >
-                                <span className="material-symbols-outlined text-[18px]">send</span>
-                                <span>Submit Exam</span>
+                                <span>Submit Examination</span>
                             </button>
                         </div>
                     </div>
                 </aside>
             </div>
 
-            {/* Mobile Bottom Drawer Navigator */}
-            {showMobileDrawer && (
-                <div className="xl:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col justify-end">
-                    <div className="bg-[#140b0b] border-t border-white/15 rounded-t-2xl max-h-[80vh] flex flex-col p-5 shadow-2xl">
-                        <div className="flex items-center justify-between pb-3 border-b border-white/10">
-                            <div>
-                                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                                    Question Navigator
-                                </h3>
-                                <div className="text-xs text-gray-400 mt-0.5">
-                                    {summary.answered} / {summary.total} Answered
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => setShowMobileDrawer(false)}
-                                className="p-1 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white"
-                            >
-                                <span className="material-symbols-outlined text-[24px]">close</span>
-                            </button>
+            {/* ═══════════════════════════════════════════════════════════════════ */}
+            {/* ── FIXED BOTTOM CONTROL DOCK (NEXT & PREVIOUS ALWAYS VISIBLE) ── */}
+            {/* ═══════════════════════════════════════════════════════════════════ */}
+            <div className="fixed bottom-0 left-0 right-0 z-40 bg-[#162932]/95 backdrop-blur-xl border-t border-[rgba(42,157,143,0.3)] px-4 sm:px-8 py-3 shadow-[0_-10px_30px_rgba(0,0,0,0.6)]">
+                <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+
+                    {/* Previous Button - Always Visible, Clickable At Any Time */}
+                    <button
+                        onClick={() => setCurrentIndex((prev) => Math.max(0, prev - 1))}
+                        disabled={currentIndex === 0}
+                        id="exam-prev-btn"
+                        className="px-5 py-2.5 rounded-xl border border-[rgba(42,157,143,0.3)] bg-[#1B313B] hover:bg-[#264653] text-sm font-bold text-white uppercase tracking-wider transition-colors duration-150 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer flex items-center space-x-2 select-none"
+                    >
+                        <span>←</span>
+                        <span>Previous</span>
+                        <span className="hidden sm:inline-block text-[10px] font-mono text-[#9CB6BF] bg-[#122027] px-1.5 py-0.5 rounded border border-[rgba(42,157,143,0.3)]">[←]</span>
+                    </button>
+
+                    {/* Center: Mark Button + Question Progress */}
+                    <div className="flex items-center space-x-2 sm:space-x-3">
+                        <button
+                            onClick={handleToggleMark}
+                            id="exam-mark-btn"
+                            className={`px-4 sm:px-5 py-2.5 rounded-xl border text-xs sm:text-sm font-bold uppercase tracking-wider transition-colors duration-150 cursor-pointer flex items-center space-x-2 select-none ${marks[currentQ?.question_id]
+                                ? 'bg-[#E9C46A]/20 text-[#E9C46A] border-[#E9C46A]/60 shadow-[0_0_12px_rgba(233,196,106,0.3)]'
+                                : 'bg-[#1B313B] border-[rgba(42,157,143,0.3)] text-[#9CB6BF] hover:bg-[#264653] hover:text-white'
+                                }`}
+                        >
+                            <span>{marks[currentQ?.question_id] ? '★ Marked' : '☆ Mark for Review'}</span>
+                            <span className="hidden sm:inline-block text-[10px] font-mono text-[#9CB6BF] bg-[#122027] px-1.5 py-0.5 rounded border border-[rgba(42,157,143,0.3)]">[M]</span>
+                        </button>
+
+                        <div className="hidden md:flex items-center space-x-2 font-mono text-xs text-[#9CB6BF] px-3.5 py-2 bg-[#122027]/90 rounded-xl border border-[rgba(42,157,143,0.25)]">
+                            <span className="font-bold text-white">Q{currentIndex + 1} / {summary.total}</span>
+                            <span className="text-[rgba(42,157,143,0.4)]">•</span>
+                            <span className="text-[#2A9D8F] font-bold">{summary.answered} Attempted</span>
+                            {summary.marked > 0 && (
+                                <>
+                                    <span className="text-[rgba(42,157,143,0.4)]">•</span>
+                                    <span className="text-[#E9C46A] font-bold">{summary.marked} Marked</span>
+                                </>
+                            )}
                         </div>
+                    </div>
 
-                        {/* Mobile Section-Grouped Grid */}
-                        <div className="space-y-4 overflow-y-auto py-4">
-                            {sections.map((sec) => {
-                                const secAnsCount = sec.questions.filter((q) => answers[q.question_id]).length;
-                                const isCurrentSec = currentSection?.name === sec.name;
+                    {/* Next Button & Footer Logos - ALWAYS VISIBLE ALL THE TIME */}
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => setCurrentIndex((prev) => Math.min(questions.length - 1, prev + 1))}
+                            disabled={currentIndex === questions.length - 1}
+                            id="exam-next-btn"
+                            className="px-6 sm:px-7 py-2.5 rounded-xl bg-[#E76F51] hover:bg-[#F4A261] text-white text-sm font-bold uppercase tracking-wider transition-colors duration-150 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer flex items-center space-x-2 shadow-[0_0_20px_rgba(231,111,81,0.35)] select-none"
+                        >
+                            <span>Next</span>
+                            <span>→</span>
+                            <span className="hidden sm:inline-block text-[10px] font-mono text-white/80 bg-black/20 px-1.5 py-0.5 rounded border border-white/20">[→]</span>
+                        </button>
+                        <div className="hidden sm:flex items-center pl-2 border-l border-[rgba(42,157,143,0.3)]">
+                            <FooterLogos size="small" />
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-                                return (
-                                    <div key={sec.name} className="space-y-2">
-                                        <div className="flex items-center justify-between text-[11px] font-bold pb-1 border-b border-white/5">
-                                            <span className={`${isCurrentSec ? 'text-orange-400' : 'text-gray-400'} flex items-center space-x-1.5`}>
-                                                {isCurrentSec && <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />}
-                                                <span>{sec.name}</span>
-                                            </span>
-                                            <span className="text-[10px] font-mono text-gray-500">
-                                                {secAnsCount} / {sec.questions.length}
-                                            </span>
-                                        </div>
+            {/* ── Mobile Drawer ── */}
+            <AnimatePresence>
+                {showMobileDrawer && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="xl:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex flex-col justify-end"
+                    >
+                        <motion.div
+                            initial={{ y: '100%' }}
+                            animate={{ y: 0 }}
+                            exit={{ y: '100%' }}
+                            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                            className="bg-[#1B313B] border-t border-[rgba(42,157,143,0.3)] rounded-t-2xl max-h-[80vh] flex flex-col p-6 shadow-2xl"
+                        >
+                            <div className="flex items-center justify-between pb-3 border-b border-[rgba(42,157,143,0.25)]">
+                                <div>
+                                    <h3 className="text-xs font-mono font-bold text-white uppercase tracking-widest">
+                                        Question Navigator
+                                    </h3>
+                                    <div className="text-xs font-mono text-[#E9C46A] mt-0.5">
+                                        {summary.answered} / {summary.total} Attempted
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowMobileDrawer(false)}
+                                    className="px-3 py-1.5 text-xs font-mono border border-[rgba(42,157,143,0.3)] rounded-lg text-white font-bold hover:bg-[#264653] transition cursor-pointer"
+                                >
+                                    Close
+                                </button>
+                            </div>
 
-                                        <div className="grid grid-cols-5 gap-2">
-                                            {sec.questions.map((q) => {
-                                                const idx = q.originalIndex;
-                                                const isAnswered = Boolean(answers[q.question_id]);
-                                                const isMarked = Boolean(marks[q.question_id]);
-                                                const isCurrent = idx === currentIndex;
+                            <div className="grid grid-cols-5 gap-2 overflow-y-auto py-4">
+                                {questions.map((q, idx) => {
+                                    const isAnswered = Boolean(answers[q.question_id]);
+                                    const isMarked = Boolean(marks[q.question_id]);
+                                    const isVisited = visited.has(q.question_id);
+                                    const isCurrent = idx === currentIndex;
 
-                                                let cellStyle = 'bg-[#180d0d] border-white/10 text-gray-400';
-                                                if (isMarked) {
-                                                    cellStyle = 'bg-purple-600/20 border-purple-500 text-purple-300 font-bold';
-                                                } else if (isAnswered) {
-                                                    cellStyle = 'bg-green-600/20 border-green-500 text-green-400 font-bold';
-                                                }
+                                    let cellClasses = 'bg-[#122027] text-[#9CB6BF] border-[rgba(42,157,143,0.2)]';
+                                    if (isMarked) {
+                                        cellClasses = 'bg-[#E9C46A] text-[#122027] border-[#E9C46A] font-extrabold shadow-sm';
+                                    } else if (isAnswered) {
+                                        cellClasses = 'bg-[#2A9D8F] text-white border-[#2A9D8F] font-bold shadow-sm';
+                                    } else if (isVisited) {
+                                        cellClasses = 'bg-[#264653] text-white border-[rgba(42,157,143,0.3)] font-medium shadow-sm';
+                                    }
 
-                                                return (
-                                                    <button
-                                                        key={q.question_id || idx}
-                                                        onClick={() => {
-                                                            setCurrentIndex(idx);
-                                                            setShowMobileDrawer(false);
-                                                        }}
-                                                        className={`h-10 rounded-lg border text-xs flex items-center justify-center font-mono ${cellStyle} ${
-                                                            isCurrent ? 'ring-2 ring-orange-500 ring-offset-2 ring-offset-[#140b0b] !border-orange-500 !text-white' : ''
-                                                        }`}
-                                                    >
-                                                        {q.position || idx + 1}
-                                                    </button>
-                                                );
-                                            })}
+                                    const formattedNum = (idx + 1).toString().padStart(2, '0');
+
+                                    return (
+                                        <button
+                                            key={q.question_id || idx}
+                                            onClick={() => {
+                                                setCurrentIndex(idx);
+                                                setShowMobileDrawer(false);
+                                            }}
+                                            className={`h-11 rounded-lg border text-sm flex items-center justify-center font-mono font-bold transition-colors duration-150 cursor-pointer ${cellClasses} ${isCurrent ? 'ring-2 ring-[#E76F51] !border-[#E76F51] font-extrabold' : ''
+                                                }`}
+                                        >
+                                            {formattedNum}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* ── Submit Confirmation Modal ── */}
+            <AnimatePresence>
+                {showSubmitModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
+                    >
+                        <motion.div
+                            initial={{ scale: 0.95, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.95, opacity: 0 }}
+                            className="bg-[#1B313B] border border-[rgba(42,157,143,0.35)] rounded-2xl max-w-md w-full p-8 shadow-2xl space-y-6 relative overflow-hidden"
+                        >
+                            {/* Top accent */}
+                            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#2A9D8F] via-[#E9C46A] to-[#E76F51]" />
+
+                            <div>
+                                <div className="inline-block px-3.5 py-1 bg-[#E76F51]/15 text-[#E76F51] border border-[#E76F51]/30 rounded-full text-xs font-mono font-bold tracking-[0.2em] uppercase mb-2">
+                                    Final Confirmation
+                                </div>
+                                <h3 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                                    Ready to Submit?
+                                </h3>
+                            </div>
+
+                            {/* Summary text */}
+                            <div className="text-sm text-[#9CB6BF] leading-relaxed">
+                                {summary.unanswered > 0 ? (
+                                    <div>
+                                        You have attempted <strong className="text-white font-bold">{summary.answered}</strong> of{' '}
+                                        <strong className="text-white font-bold">{summary.total}</strong> questions.
+                                        <div className="mt-1 text-[#E76F51] font-semibold font-mono text-xs">
+                                            {summary.unanswered} questions remain unanswered.
                                         </div>
                                     </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Submit Confirmation Modal */}
-            {showSubmitModal && (
-                <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="bg-[#140b0b] border border-white/15 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5">
-                        <div className="flex items-center space-x-3 text-orange-400">
-                            <span className="material-symbols-outlined text-[28px]">assignment_turned_in</span>
-                            <h3 className="text-base font-bold text-white">Confirm Exam Submission</h3>
-                        </div>
-
-                        <p className="text-xs text-gray-300 leading-relaxed">
-                            Are you sure you want to finish and submit your exam? You cannot modify your answers once submitted.
-                        </p>
-
-                        {/* Summary breakdown */}
-                        <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                            <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-xl">
-                                <span className="text-[10px] text-green-400 font-bold uppercase block">Answered</span>
-                                <div className="text-xl font-black text-white mt-1">{summary.answered}</div>
+                                ) : (
+                                    <div>
+                                        <strong className="text-[#2A9D8F] font-bold">{summary.total} / {summary.total}</strong> questions attempted. All questions answered!
+                                    </div>
+                                )}
                             </div>
-                            <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl">
-                                <span className="text-[10px] text-purple-400 font-bold uppercase block">Marked</span>
-                                <div className="text-xl font-black text-white mt-1">{summary.marked}</div>
-                            </div>
-                            <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
-                                <span className="text-[10px] text-gray-400 font-bold uppercase block">Unanswered</span>
-                                <div className="text-xl font-black text-gray-300 mt-1">{summary.unanswered}</div>
-                            </div>
-                        </div>
 
-                        {/* Section-wise Breakdown */}
-                        {sectionMetrics.length > 0 && (
-                            <div className="bg-[#180d0d] border border-white/10 rounded-xl p-3 space-y-2">
-                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                                    Section Summary
+                            {/* Summary Cards */}
+                            <div className="grid grid-cols-3 gap-3 text-center text-sm font-mono">
+                                <div className="p-4 bg-[#2A9D8F]/15 border border-[#2A9D8F]/35 rounded-xl">
+                                    <span className="text-xs text-[#9CB6BF] font-bold uppercase block">Attempted</span>
+                                    <div className="text-2xl font-extrabold text-[#2A9D8F] mt-1">{summary.answered}</div>
                                 </div>
-                                <div className="space-y-1.5 text-xs">
-                                    {sectionMetrics.map((sec) => (
-                                        <div key={sec.name} className="flex items-center justify-between text-gray-300">
-                                            <span>{sec.name}</span>
-                                            <span className="font-mono text-[11px]">
-                                                <span className={sec.answered === sec.total ? 'text-green-400 font-bold' : 'text-orange-400 font-bold'}>
-                                                    {sec.answered}
-                                                </span>
-                                                <span className="text-gray-500"> / {sec.total}</span>
-                                            </span>
-                                        </div>
-                                    ))}
+                                <div className="p-4 bg-[#E9C46A]/15 border border-[#E9C46A]/35 rounded-xl">
+                                    <span className="text-xs text-[#9CB6BF] font-bold uppercase block">Marked</span>
+                                    <div className="text-2xl font-extrabold text-[#E9C46A] mt-1">{summary.marked}</div>
+                                </div>
+                                <div className="p-4 bg-[#122027] border border-[rgba(42,157,143,0.25)] rounded-xl">
+                                    <span className="text-xs text-[#9CB6BF] font-bold uppercase block">Remaining</span>
+                                    <div className="text-2xl font-extrabold text-white mt-1">{summary.unanswered}</div>
                                 </div>
                             </div>
-                        )}
 
-                        {error && (
-                            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs">
-                                {error}
+                            {error && (
+                                <div className="p-4 rounded-xl bg-[#E76F51]/15 border border-[#E76F51]/30 text-[#E76F51] text-sm font-mono font-medium">
+                                    {error}
+                                </div>
+                            )}
+
+                            <div className="flex items-center justify-end space-x-3 pt-2">
+                                <button
+                                    onClick={() => setShowSubmitModal(false)}
+                                    disabled={isSubmitting}
+                                    className="px-5 py-2.5 bg-[#162932] hover:bg-[#264653] border border-[rgba(42,157,143,0.3)] text-sm font-bold uppercase tracking-wider text-[#9CB6BF] hover:text-white rounded-xl transition-colors duration-150 cursor-pointer"
+                                >
+                                    Go Back
+                                </button>
+                                <button
+                                    onClick={handleFinalSubmit}
+                                    disabled={isSubmitting}
+                                    className="px-6 py-2.5 bg-[#E76F51] hover:bg-[#F4A261] text-white text-sm font-bold uppercase tracking-widest rounded-xl shadow-lg transition-colors duration-150 cursor-pointer disabled:opacity-50 flex items-center space-x-2"
+                                >
+                                    {isSubmitting && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                                    <span>{isSubmitting ? 'Submitting...' : 'Submit Exam'}</span>
+                                </button>
                             </div>
-                        )}
-
-                        <div className="flex items-center justify-end space-x-3 pt-2">
-                            <button
-                                onClick={() => setShowSubmitModal(false)}
-                                disabled={isSubmitting}
-                                className="px-4 py-2 bg-white/5 hover:bg-white/10 text-xs font-semibold text-gray-300 rounded-lg transition"
-                            >
-                                Continue Exam
-                            </button>
-                            <button
-                                onClick={handleFinalSubmit}
-                                disabled={isSubmitting}
-                                className="px-5 py-2 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white text-xs font-bold uppercase tracking-wider rounded-lg shadow-lg shadow-orange-600/25 transition flex items-center space-x-1"
-                            >
-                                <span className="material-symbols-outlined text-[16px]">
-                                    {isSubmitting ? 'sync' : 'done_all'}
-                                </span>
-                                <span>{isSubmitting ? 'Submitting...' : 'Yes, Submit Now'}</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

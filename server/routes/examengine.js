@@ -4,16 +4,6 @@ const jwt = require('jsonwebtoken');
 const pool = require('../db');
 const { authenticateToken } = require('../middleware/authMiddleware');
 
-// Helper: Section ordering for exam sections (1: Math, 2: Aptitude, 3: English, 4: C Programming)
-const getSectionOrder = (subjectName) => {
-    const s = (subjectName || '').toLowerCase().trim();
-    if (s.includes('math')) return 1;
-    if (s.includes('aptitude')) return 2;
-    if (s.includes('english')) return 3;
-    if (s.includes('c prog') || s === 'c' || s.includes('programming')) return 4;
-    return 99;
-};
-
 // ============================================================
 // PUBLIC ROUTE: POST /exam/join
 // Joins an exam session (initial join or resume on new device)
@@ -43,9 +33,9 @@ router.post('/join', async (req, res) => {
                 s.started_at AS shift_started_at,
                 s.ended_at AS shift_ended_at,
                 s.extra_time_min AS shift_extra_time_min,
-                s.paper_generated,
                 s.access_close_at,
                 s.duration_override_min,
+                s.paper_generated,
                 ec.id AS exam_id,
                 ec.name AS exam_name,
                 ec.grace_join_min,
@@ -160,7 +150,6 @@ router.post('/join', async (req, res) => {
                     q.image_url,
                     q.difficulty,
                     t.name AS topic_name,
-                    s.id AS subject_id,
                     s.name AS subject_name,
                     cq.selected_opt,
                     cq.is_marked
@@ -212,7 +201,7 @@ router.post('/join', async (req, res) => {
         }
 
         // Case C: NEW SESSION INITIAL JOIN
-        // Check hard access window (if defined), else fall back to grace join window
+        // Check hard access window (if defined)
         if (candidate.access_close_at) {
             const closeAt = new Date(candidate.access_close_at);
             if (now > closeAt) {
@@ -222,7 +211,7 @@ router.post('/join', async (req, res) => {
                 });
             }
         } else if (candidate.shift_started_at) {
-            // Fallback: legacy grace join window
+            // Fallback to legacy grace window if no hard close time is set
             const startedAt = new Date(candidate.shift_started_at);
             const graceMinutes = candidate.grace_join_min || 15;
             const graceExpiry = new Date(startedAt.getTime() + graceMinutes * 60 * 1000);
@@ -243,116 +232,53 @@ router.post('/join', async (req, res) => {
             [candidate.shift_id, candidate.id]
         );
 
-        // 2. Fetch student-level weightage rules and pick exactly the right number per topic/difficulty bucket
-        const weightageRes = await client.query(
-            `SELECT 
-                wr.topic_id,
-                t.name AS topic_name,
-                s.id AS subject_id,
-                s.name AS subject_name,
-                wr.student_easy_count,
-                wr.student_medium_count,
-                wr.student_hard_count
-             FROM weightage_rules wr
-             JOIN topics t ON t.id = wr.topic_id
-             JOIN subjects s ON s.id = t.subject_id
-             JOIN shifts sh ON sh.exam_id = wr.exam_id
-             WHERE sh.id = $1
-             AND (wr.student_easy_count + wr.student_medium_count + wr.student_hard_count) > 0`,
+        // 2. Fetch shift questions with subject details for section-wise randomization
+        const shiftQuestionsRes = await client.query(
+            `SELECT sq.question_id, COALESCE(s.id, 0) AS subject_id
+             FROM shift_questions sq
+             JOIN questions q ON q.id = sq.question_id
+             LEFT JOIN topics t ON t.id = q.topic_id
+             LEFT JOIN subjects s ON s.id = t.subject_id
+             WHERE sq.shift_id = $1`,
             [candidate.shift_id]
         );
 
-        // Check that question paper was generated for the shift
-        const shiftCheckRes = await client.query(
-            'SELECT COUNT(*) FROM shift_questions WHERE shift_id = $1',
-            [candidate.shift_id]
-        );
-        if (parseInt(shiftCheckRes.rows[0].count, 10) === 0) {
+        if (shiftQuestionsRes.rows.length === 0) {
             await client.query('ROLLBACK');
             return res.status(400).json({
                 error: `Question paper has not been generated for shift '${candidate.shift_name}'. Please contact the invigilator.`,
             });
         }
 
-        // If no student quotas configured, fall back to all shift questions grouped by section
-        const assignedQuestionIds = [];
-        if (weightageRes.rows.length === 0) {
-            const fallback = await client.query(
-                `SELECT sq.question_id, s.name AS subject_name
-                 FROM shift_questions sq
-                 JOIN questions q ON q.id = sq.question_id
-                 JOIN topics t ON t.id = q.topic_id
-                 JOIN subjects s ON s.id = t.subject_id
-                 WHERE sq.shift_id = $1`,
-                [candidate.shift_id]
-            );
-            const subjectMap = {};
-            for (const row of fallback.rows) {
-                const sub = row.subject_name || 'General';
-                if (!subjectMap[sub]) subjectMap[sub] = [];
-                subjectMap[sub].push(row.question_id);
+        // Group question IDs by subject
+        const subjectMap = new Map();
+        for (const row of shiftQuestionsRes.rows) {
+            const subjId = row.subject_id;
+            if (!subjectMap.has(subjId)) {
+                subjectMap.set(subjId, []);
             }
-            const sortedSubjects = Object.keys(subjectMap).sort((a, b) => getSectionOrder(a) - getSectionOrder(b));
-            for (const sub of sortedSubjects) {
-                const qIds = subjectMap[sub];
-                // Shuffle intra-section
-                for (let i = qIds.length - 1; i > 0; i--) {
-                    const j = Math.floor(Math.random() * (i + 1));
-                    [qIds[i], qIds[j]] = [qIds[j], qIds[i]];
-                }
-                assignedQuestionIds.push(...qIds);
-            }
-        } else {
-            // Group weightage rules by subject
-            const subjectGroups = {};
-            for (const rule of weightageRes.rows) {
-                const sub = rule.subject_name || 'General';
-                if (!subjectGroups[sub]) subjectGroups[sub] = [];
-                subjectGroups[sub].push(rule);
-            }
-
-            // Sort subjects in canonical section order: Mathematics -> Aptitude -> English -> C Programming
-            const sortedSubjects = Object.keys(subjectGroups).sort((a, b) => getSectionOrder(a) - getSectionOrder(b));
-            const diffs = ['easy', 'medium', 'hard'];
-
-            for (const sub of sortedSubjects) {
-                const rules = subjectGroups[sub];
-                const sectionQuestionIds = [];
-
-                for (const rule of rules) {
-                    for (const diff of diffs) {
-                        const quota = parseInt(rule[`student_${diff}_count`], 10) || 0;
-                        if (quota === 0) continue;
-                        const bucketRes = await client.query(
-                            `SELECT sq.question_id
-                             FROM shift_questions sq
-                             JOIN questions q ON q.id = sq.question_id
-                             WHERE sq.shift_id = $1
-                               AND q.topic_id = $2
-                               AND q.difficulty = $3
-                             ORDER BY RANDOM()
-                             LIMIT $4`,
-                            [candidate.shift_id, rule.topic_id, diff, quota]
-                        );
-                        if (bucketRes.rows.length < quota) {
-                            await client.query('ROLLBACK');
-                            return res.status(400).json({
-                                error: `Not enough questions in shift pool for topic '${rule.topic_name}' difficulty '${diff}'. Need ${quota}, found ${bucketRes.rows.length}.`,
-                            });
-                        }
-                        sectionQuestionIds.push(...bucketRes.rows.map(r => r.question_id));
-                    }
-                }
-
-                // Randomize questions STRICTLY within this section
-                for (let i = sectionQuestionIds.length - 1; i > 0; i--) {
-                    const j = Math.floor(Math.random() * (i + 1));
-                    [sectionQuestionIds[i], sectionQuestionIds[j]] = [sectionQuestionIds[j], sectionQuestionIds[i]];
-                }
-
-                assignedQuestionIds.push(...sectionQuestionIds);
-            }
+            subjectMap.get(subjId).push(row.question_id);
         }
+
+        // In-place Fisher-Yates shuffle
+        const shuffleArray = (arr) => {
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr;
+        };
+
+        // Randomize questions within each section/subject
+        for (const qIds of subjectMap.values()) {
+            shuffleArray(qIds);
+        }
+
+        // Randomize the order of sections/subjects
+        const shuffledSubjectIds = shuffleArray(Array.from(subjectMap.keys()));
+
+        // Flatten: questions of each subject stay consecutively grouped, while internal order & section order are randomized
+        const assignedQuestionIds = shuffledSubjectIds.flatMap((subjId) => subjectMap.get(subjId));
 
         // 3. Insert unique positions 1..N into candidate_questions (with ON CONFLICT DO NOTHING)
         for (let i = 0; i < assignedQuestionIds.length; i++) {
@@ -399,7 +325,6 @@ router.post('/join', async (req, res) => {
                 q.image_url,
                 q.difficulty,
                 t.name AS topic_name,
-                s.id AS subject_id,
                 s.name AS subject_name,
                 cq.selected_opt,
                 cq.is_marked
@@ -720,7 +645,7 @@ router.post('/submit', async (req, res) => {
             return res.status(403).json({ error: 'Submission rejected: Exam time has expired.' });
         }
 
-        // Compute correct, wrong, skipped counts and score with negative marking
+        // Compute correct, wrong, skipped counts
         const evalRes = await client.query(
             `SELECT 
                 COUNT(cq.id) AS total_questions,
@@ -784,7 +709,7 @@ router.post('/submit', async (req, res) => {
                 now,
                 percentage,
                 passFail,
-                grade,
+                grade
             ]
         );
 
