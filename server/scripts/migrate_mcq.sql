@@ -115,7 +115,16 @@ CREATE TABLE questions (
   negative_marks NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (negative_marks >= 0),
 
   -- Optional image: stored as relative file path or base64 data URI
-  image_url    TEXT,
+  image_url        TEXT,
+  opt_a_image_url  TEXT,
+  opt_b_image_url  TEXT,
+  opt_c_image_url  TEXT,
+  opt_d_image_url  TEXT,
+
+  -- Tracks which Supabase cloud_question id this row came from.
+  -- Used for deduplication during sync — each laptop checks locally
+  -- so multiple laptops can independently sync without a global flag.
+  cloud_question_id INTEGER,
 
   is_deleted   BOOLEAN NOT NULL DEFAULT false,    -- soft delete
   created_at   TIMESTAMPTZ DEFAULT NOW()
