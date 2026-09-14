@@ -148,6 +148,13 @@ router.post('/', async (req, res) => {
         );
 
         results.synced++;
+
+        // Update portal display flag in Supabase (fire-and-forget, non-blocking).
+        // This is purely cosmetic — the portal shows "Synced" once any laptop
+        // has successfully pulled the question. Local deduplication via
+        // cloud_question_id remains the source of truth for all laptops.
+        supabase.from('cloud_questions').update({ synced_to_local: true }).eq('id', q.id).then(() => {});
+
       } catch (err) {
         results.failed++;
         results.errors.push(`Question #${q.id}: ${err.message}`);
