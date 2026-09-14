@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import FooterLogos from "../components/FooterLogos";
+import { API_URL } from "../utils/api";
 
-const BACKEND_URL = import.meta.env.VITE_API_URL;
+const BACKEND_URL = API_URL;
 
 const ROUNDS = [
     { key: "rapidfire", label: "Rapid Fire" },

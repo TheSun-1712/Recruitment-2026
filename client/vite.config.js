@@ -24,5 +24,14 @@ export default defineConfig({
     port: 5173,
     host: '0.0.0.0',
     strictPort: true,
+    proxy: {
+      '/exam': 'http://localhost:3000',
+      '/admin': 'http://localhost:3000',
+      '/uploads': 'http://localhost:3000',
+      '/socket.io': {
+        target: 'http://localhost:3000',
+        ws: true,
+      },
+    },
   },
 })
