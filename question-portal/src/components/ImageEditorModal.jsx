@@ -90,50 +90,84 @@ export default function ImageEditorModal({ imageSrc, onClose, onSave }) {
     <div
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
-        position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-        background: 'rgba(0,0,0,0.88)', display: 'flex', alignItems: 'center',
-        justifyContent: 'center', zIndex: 99999, padding: 20,
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100vw',
+        height: '100vh',
+        background: 'rgba(10, 18, 22, 0.88)',
+        backdropFilter: 'blur(6px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 99999,
+        padding: 24,
       }}
     >
       <div
         style={{
-          background: 'linear-gradient(135deg, #1e1433 0%, #12101e 100%)',
-          border: '1px solid rgba(249,115,22,0.3)',
-          borderRadius: 16, padding: 24, display: 'flex', flexDirection: 'column',
-          gap: 20, maxWidth: '92vw', maxHeight: '92vh', overflow: 'hidden',
-          boxShadow: '0 25px 80px rgba(0,0,0,0.7)',
+          background: 'linear-gradient(135deg, #1B313B 0%, #122027 100%)',
+          border: '1px solid rgba(42, 157, 143, 0.35)',
+          borderRadius: 16,
+          padding: 26,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 20,
+          maxWidth: '92vw',
+          maxHeight: '92vh',
+          overflow: 'hidden',
+          boxShadow: '0 25px 80px rgba(0, 0, 0, 0.75)',
         }}
       >
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <h3 style={{ margin: 0, color: '#f1f5f9', fontSize: 18, fontWeight: 700 }}>
+            <h3 style={{ margin: 0, color: '#F1F5F9', fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em' }}>
               ✂️ Crop &amp; Edit Image
             </h3>
-            <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: 12 }}>
-              Drag the handles to crop. Adjust scale and rotation below.
+            <p style={{ margin: '4px 0 0', color: '#9CB6BF', fontSize: 13 }}>
+              Drag the bounding handles to crop. Adjust zoom scale and rotation angle below.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
             style={{
-              background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
-              color: '#94a3b8', borderRadius: 8, width: 32, height: 32, cursor: 'pointer',
-              fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgba(38, 70, 83, 0.5)',
+              border: '1px solid rgba(42, 157, 143, 0.3)',
+              color: '#9CB6BF',
+              borderRadius: 8,
+              width: 36,
+              height: 36,
+              cursor: 'pointer',
+              fontSize: 16,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.15s',
             }}
-          >✕</button>
+          >
+            ✕
+          </button>
         </div>
 
         {/* Crop Area */}
         <div style={{
-          overflow: 'auto', background: '#08060f', borderRadius: 10,
-          padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          minHeight: 200, maxHeight: 'calc(92vh - 260px)',
-          border: '1px solid rgba(255,255,255,0.07)',
+          overflow: 'auto',
+          background: '#0E1A20',
+          borderRadius: 12,
+          padding: 14,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: 220,
+          maxHeight: 'calc(92vh - 270px)',
+          border: '1px solid rgba(42, 157, 143, 0.2)',
         }}>
           {!imgLoaded && (
-            <div style={{ color: '#64748b', fontSize: 13 }}>Loading image...</div>
+            <div style={{ color: '#9CB6BF', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div className="spinner" style={{ width: 16, height: 16 }} /> Loading image preview...
+            </div>
           )}
           <ReactCrop
             crop={crop}
@@ -149,7 +183,7 @@ export default function ImageEditorModal({ imageSrc, onClose, onSave }) {
               crossOrigin="anonymous"
               style={{
                 maxWidth: '75vw',
-                maxHeight: 'calc(92vh - 280px)',
+                maxHeight: 'calc(92vh - 290px)',
                 display: 'block',
                 transform: `scale(${scale}) rotate(${rotate}deg)`,
                 transformOrigin: 'center',
@@ -160,66 +194,72 @@ export default function ImageEditorModal({ imageSrc, onClose, onSave }) {
         </div>
 
         {/* Controls */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: 20,
+          background: 'rgba(18, 32, 39, 0.6)',
+          padding: '16px 20px',
+          borderRadius: 12,
+          border: '1px solid rgba(42, 157, 143, 0.15)',
+        }}>
           <div>
-            <label style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginBottom: 6, fontWeight: 600 }}>
-              🔍 Scale: {Math.round(scale * 100)}%
+            <label style={{ fontSize: 12, color: '#9CB6BF', display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontWeight: 700 }}>
+              <span>🔍 Zoom Scale</span>
+              <span style={{ color: '#2A9D8F' }}>{Math.round(scale * 100)}%</span>
             </label>
             <input
-              type="range" min="0.5" max="3" step="0.05"
+              type="range"
+              min="0.5"
+              max="3"
+              step="0.05"
               value={scale}
               onChange={(e) => setScale(parseFloat(e.target.value))}
-              style={{ width: '100%', accentColor: '#f97316' }}
+              style={{ width: '100%', accentColor: '#2A9D8F', cursor: 'pointer' }}
             />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginBottom: 6, fontWeight: 600 }}>
-              🔄 Rotate: {rotate}°
+            <label style={{ fontSize: 12, color: '#9CB6BF', display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontWeight: 700 }}>
+              <span>🔄 Rotate Angle</span>
+              <span style={{ color: '#E76F51' }}>{rotate}°</span>
             </label>
             <input
-              type="range" min="-180" max="180" step="1"
+              type="range"
+              min="-180"
+              max="180"
+              step="1"
               value={rotate}
               onChange={(e) => setRotate(parseInt(e.target.value, 10))}
-              style={{ width: '100%', accentColor: '#f97316' }}
+              style={{ width: '100%', accentColor: '#E76F51', cursor: 'pointer' }}
             />
           </div>
         </div>
 
         {/* Buttons */}
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', alignItems: 'center' }}>
           <button
             type="button"
+            className="btn btn-ghost"
             onClick={() => { setScale(1); setRotate(0); }}
-            style={{
-              padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-              background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
-              color: '#94a3b8', cursor: 'pointer',
-            }}
+            style={{ padding: '9px 18px', fontSize: 13, fontWeight: 700 }}
           >
             Reset
           </button>
           <button
             type="button"
+            className="btn btn-ghost"
             onClick={onClose}
-            style={{
-              padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-              background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
-              color: '#94a3b8', cursor: 'pointer',
-            }}
+            style={{ padding: '9px 18px', fontSize: 13, fontWeight: 700 }}
           >
             Cancel
           </button>
           <button
             type="button"
+            className="btn btn-primary"
             onClick={handleSave}
-            style={{
-              padding: '8px 22px', borderRadius: 8, fontSize: 13, fontWeight: 700,
-              background: 'linear-gradient(135deg, #f97316, #dc2626)',
-              border: 'none', color: '#fff', cursor: 'pointer',
-              boxShadow: '0 4px 15px rgba(249,115,22,0.4)',
-            }}
+            style={{ padding: '9px 24px', fontSize: 13, fontWeight: 800 }}
           >
-            ✓ Save Crop
+            ✓ Save Cropped Image
           </button>
         </div>
       </div>

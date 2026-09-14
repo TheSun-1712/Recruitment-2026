@@ -19,6 +19,17 @@ export default function ExamPage() {
 
     const [questions, setQuestions] = useState(() => session?.questions || []);
     const [currentIndex, setCurrentIndex] = useState(0);
+
+    // ─── Section Definitions (fixed order: Maths 1-15, Aptitude 16-22, English 23-27, C Prog 28-30) ───
+    const SECTIONS = [
+        { label: 'Mathematics',   short: 'Math',  start: 0,  end: 14, color: '#2A9D8F', bg: 'rgba(42,157,143,0.15)', border: 'rgba(42,157,143,0.45)', count: 15 },
+        { label: 'Aptitude',      short: 'Apt',   start: 15, end: 21, color: '#E9C46A', bg: 'rgba(233,196,106,0.15)', border: 'rgba(233,196,106,0.45)', count: 7  },
+        { label: 'English',       short: 'Eng',   start: 22, end: 26, color: '#F4A261', bg: 'rgba(244,162,97,0.15)',  border: 'rgba(244,162,97,0.45)',  count: 5  },
+        { label: 'C Programming', short: 'C Prog',start: 27, end: 29, color: '#A8DADC', bg: 'rgba(168,218,220,0.15)', border: 'rgba(168,218,220,0.45)', count: 3  },
+    ];
+
+    // Which section the current question belongs to
+    const activeSection = SECTIONS.findIndex(s => currentIndex >= s.start && currentIndex <= s.end);
     const [answers, setAnswers] = useState(() => {
         const initial = {};
         (session?.questions || []).forEach((q) => {
@@ -549,9 +560,19 @@ export default function ExamPage() {
                     </div>
                 </div>
 
-                {/* Center: Question Position */}
-                <div className="font-mono text-xs font-bold tracking-wider text-white uppercase px-3 py-1.5 bg-[#1B313B] rounded-lg border border-[rgba(42,157,143,0.3)]">
-                    Question <span className="text-[#E9C46A] font-extrabold">{currentIndex + 1}</span> <span className="text-[#9CB6BF] font-normal">of {summary.total}</span>
+                {/* Center: Question Position + current section */}
+                <div className="flex items-center gap-2">
+                    <div className="font-mono text-xs font-bold tracking-wider text-white uppercase px-3 py-1.5 bg-[#1B313B] rounded-lg border border-[rgba(42,157,143,0.3)]">
+                        Q<span className="text-[#E9C46A] font-extrabold">{currentIndex + 1}</span> <span className="text-[#9CB6BF] font-normal">/ {summary.total}</span>
+                    </div>
+                    {activeSection >= 0 && (
+                        <div
+                            className="hidden sm:inline-block font-mono text-[10px] font-bold tracking-widest uppercase px-2.5 py-1.5 rounded-lg border"
+                            style={{ color: SECTIONS[activeSection].color, background: SECTIONS[activeSection].bg, borderColor: SECTIONS[activeSection].border }}
+                        >
+                            {SECTIONS[activeSection].label}
+                        </div>
+                    )}
                 </div>
 
                 {/* Right: Timer + Submit */}
@@ -589,6 +610,43 @@ export default function ExamPage() {
                     </button>
                 </div>
             </header>
+
+            {/* ── Section Tab Bar ── */}
+            <div className="sticky top-[57px] z-20 bg-[#162932]/95 backdrop-blur-sm border-b border-[rgba(42,157,143,0.2)] px-4 sm:px-8 shadow-md">
+                <div className="max-w-7xl mx-auto flex items-stretch gap-0 overflow-x-auto scrollbar-hide">
+                    {SECTIONS.map((sec, si) => {
+                        const isActive = si === activeSection;
+                        const sectionAnswered = questions.slice(sec.start, sec.end + 1).filter(q => answers[q?.question_id]).length;
+                        return (
+                            <button
+                                key={sec.label}
+                                onClick={() => setCurrentIndex(sec.start)}
+                                className={`relative flex flex-col items-center justify-center px-4 sm:px-6 py-2 text-[10px] sm:text-xs font-mono font-bold uppercase tracking-wider whitespace-nowrap transition-all duration-200 cursor-pointer border-b-2 ${
+                                    isActive
+                                        ? 'border-b-2 text-white'
+                                        : 'border-b-2 border-transparent text-[#9CB6BF] hover:text-white hover:bg-[#1B313B]/60'
+                                }`}
+                                style={isActive ? { borderBottomColor: sec.color, color: sec.color } : {}}
+                            >
+                                <span className="hidden sm:inline">{sec.label}</span>
+                                <span className="sm:hidden">{sec.short}</span>
+                                <span
+                                    className="text-[9px] mt-0.5 font-normal"
+                                    style={{ color: isActive ? sec.color : '#6B8A95' }}
+                                >
+                                    {sectionAnswered}/{sec.count}
+                                </span>
+                                {isActive && (
+                                    <span
+                                        className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full"
+                                        style={{ background: sec.color }}
+                                    />
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
 
             {/* ── Paused Banner ── */}
             {isPaused && (
@@ -749,7 +807,7 @@ export default function ExamPage() {
                             </div>
 
                             {/* Legend */}
-                            <div className="grid grid-cols-2 gap-2 text-xs font-mono text-[#9CB6BF] mb-5 pb-4 border-b border-[rgba(42,157,143,0.25)]">
+                            <div className="grid grid-cols-2 gap-2 text-xs font-mono text-[#9CB6BF] mb-4 pb-3 border-b border-[rgba(42,157,143,0.25)]">
                                 <div className="flex items-center space-x-2">
                                     <span className="w-3.5 h-3.5 rounded bg-[#2A9D8F] shrink-0" />
                                     <span>Attempted ({summary.answered})</span>
@@ -768,34 +826,63 @@ export default function ExamPage() {
                                 </div>
                             </div>
 
-                            {/* Question Grid */}
-                            <div className="grid grid-cols-5 gap-2 max-h-[48vh] overflow-y-auto pr-1">
-                                {questions.map((q, idx) => {
-                                    const isAnswered = Boolean(answers[q.question_id]);
-                                    const isMarked = Boolean(marks[q.question_id]);
-                                    const isVisited = visited.has(q.question_id);
-                                    const isCurrent = idx === currentIndex;
-
-                                    let cellClasses = 'bg-[#122027]/80 text-[#9CB6BF] border-[rgba(42,157,143,0.2)] hover:bg-[#162932] hover:text-white';
-                                    if (isMarked) {
-                                        cellClasses = 'bg-[#E9C46A] text-[#122027] border-[#E9C46A] font-extrabold shadow-sm';
-                                    } else if (isAnswered) {
-                                        cellClasses = 'bg-[#2A9D8F] text-white border-[#2A9D8F] font-bold shadow-sm';
-                                    } else if (isVisited) {
-                                        cellClasses = 'bg-[#264653] text-white border-[rgba(42,157,143,0.35)] font-medium';
-                                    }
-
-                                    const formattedNum = (idx + 1).toString().padStart(2, '0');
-
+                            {/* Section-Grouped Question Grid */}
+                            <div className="max-h-[46vh] overflow-y-auto pr-1 space-y-4">
+                                {SECTIONS.map((sec, si) => {
+                                    const secQuestions = questions.slice(sec.start, sec.end + 1);
+                                    const secAnswered = secQuestions.filter(q => answers[q?.question_id]).length;
+                                    const isCurrentSection = si === activeSection;
                                     return (
-                                        <button
-                                            key={q.question_id || idx}
-                                            onClick={() => setCurrentIndex(idx)}
-                                            className={`h-10 rounded-lg border text-xs sm:text-sm flex items-center justify-center font-mono font-bold transition-colors duration-150 cursor-pointer ${cellClasses} ${isCurrent ? 'ring-2 ring-[#E76F51] !border-[#E76F51] font-extrabold shadow-[0_0_12px_rgba(231,111,81,0.5)]' : ''
-                                                }`}
-                                        >
-                                            {formattedNum}
-                                        </button>
+                                        <div key={sec.label}>
+                                            {/* Section Label */}
+                                            <div
+                                                className="flex items-center justify-between text-[10px] font-mono font-bold uppercase tracking-widest mb-2 px-1"
+                                                style={{ color: sec.color }}
+                                            >
+                                                <span className="flex items-center gap-1.5">
+                                                    <span
+                                                        className="w-1.5 h-1.5 rounded-full inline-block"
+                                                        style={{ background: sec.color }}
+                                                    />
+                                                    {sec.label}
+                                                </span>
+                                                <span style={{ color: isCurrentSection ? sec.color : '#6B8A95' }}>
+                                                    {secAnswered}/{sec.count}
+                                                </span>
+                                            </div>
+                                            {/* Grid for this section */}
+                                            <div className="grid grid-cols-5 gap-2">
+                                                {secQuestions.map((q, i) => {
+                                                    const idx = sec.start + i;
+                                                    const isAnswered = Boolean(answers[q.question_id]);
+                                                    const isMarked = Boolean(marks[q.question_id]);
+                                                    const isVisited = visited.has(q.question_id);
+                                                    const isCurrent = idx === currentIndex;
+
+                                                    let cellClasses = 'bg-[#122027]/80 text-[#9CB6BF] border-[rgba(42,157,143,0.2)] hover:bg-[#162932] hover:text-white';
+                                                    if (isMarked) {
+                                                        cellClasses = 'bg-[#E9C46A] text-[#122027] border-[#E9C46A] font-extrabold shadow-sm';
+                                                    } else if (isAnswered) {
+                                                        cellClasses = 'bg-[#2A9D8F] text-white border-[#2A9D8F] font-bold shadow-sm';
+                                                    } else if (isVisited) {
+                                                        cellClasses = 'bg-[#264653] text-white border-[rgba(42,157,143,0.35)] font-medium';
+                                                    }
+
+                                                    const formattedNum = (idx + 1).toString().padStart(2, '0');
+                                                    return (
+                                                        <button
+                                                            key={q.question_id || idx}
+                                                            onClick={() => setCurrentIndex(idx)}
+                                                            className={`h-10 rounded-lg border text-xs flex items-center justify-center font-mono font-bold transition-colors duration-150 cursor-pointer ${cellClasses} ${
+                                                                isCurrent ? 'ring-2 ring-[#E76F51] !border-[#E76F51] font-extrabold shadow-[0_0_12px_rgba(231,111,81,0.5)]' : ''
+                                                            }`}
+                                                        >
+                                                            {formattedNum}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
                                     );
                                 })}
                             </div>
@@ -820,7 +907,7 @@ export default function ExamPage() {
             <div className="fixed bottom-0 left-0 right-0 z-40 bg-[#162932]/95 backdrop-blur-xl border-t border-[rgba(42,157,143,0.3)] px-4 sm:px-8 py-3 shadow-[0_-10px_30px_rgba(0,0,0,0.6)]">
                 <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
 
-                    {/* Previous Button - Always Visible, Clickable At Any Time */}
+                    {/* Previous Button */}
                     <button
                         onClick={() => setCurrentIndex((prev) => Math.max(0, prev - 1))}
                         disabled={currentIndex === 0}
@@ -828,11 +915,11 @@ export default function ExamPage() {
                         className="px-5 py-2.5 rounded-xl border border-[rgba(42,157,143,0.3)] bg-[#1B313B] hover:bg-[#264653] text-sm font-bold text-white uppercase tracking-wider transition-colors duration-150 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer flex items-center space-x-2 select-none"
                     >
                         <span>←</span>
-                        <span>Previous</span>
+                        <span className="hidden sm:inline">Previous</span>
                         <span className="hidden sm:inline-block text-[10px] font-mono text-[#9CB6BF] bg-[#122027] px-1.5 py-0.5 rounded border border-[rgba(42,157,143,0.3)]">[←]</span>
                     </button>
 
-                    {/* Center: Mark Button + Question Progress */}
+                    {/* Center: Section indicator + Mark + Progress */}
                     <div className="flex items-center space-x-2 sm:space-x-3">
                         <button
                             onClick={handleToggleMark}
@@ -842,35 +929,58 @@ export default function ExamPage() {
                                 : 'bg-[#1B313B] border-[rgba(42,157,143,0.3)] text-[#9CB6BF] hover:bg-[#264653] hover:text-white'
                                 }`}
                         >
-                            <span>{marks[currentQ?.question_id] ? '★ Marked' : '☆ Mark for Review'}</span>
+                            <span>{marks[currentQ?.question_id] ? '★ Marked' : '☆ Mark'}</span>
                             <span className="hidden sm:inline-block text-[10px] font-mono text-[#9CB6BF] bg-[#122027] px-1.5 py-0.5 rounded border border-[rgba(42,157,143,0.3)]">[M]</span>
                         </button>
 
                         <div className="hidden md:flex items-center space-x-2 font-mono text-xs text-[#9CB6BF] px-3.5 py-2 bg-[#122027]/90 rounded-xl border border-[rgba(42,157,143,0.25)]">
+                            {activeSection >= 0 && (
+                                <span
+                                    className="font-bold uppercase tracking-wide"
+                                    style={{ color: SECTIONS[activeSection].color }}
+                                >
+                                    {SECTIONS[activeSection].label}
+                                </span>
+                            )}
+                            <span className="text-[rgba(42,157,143,0.4)]">•</span>
                             <span className="font-bold text-white">Q{currentIndex + 1} / {summary.total}</span>
                             <span className="text-[rgba(42,157,143,0.4)]">•</span>
-                            <span className="text-[#2A9D8F] font-bold">{summary.answered} Attempted</span>
+                            <span className="text-[#2A9D8F] font-bold">{summary.answered} Ans</span>
                             {summary.marked > 0 && (
                                 <>
                                     <span className="text-[rgba(42,157,143,0.4)]">•</span>
-                                    <span className="text-[#E9C46A] font-bold">{summary.marked} Marked</span>
+                                    <span className="text-[#E9C46A] font-bold">{summary.marked} ★</span>
                                 </>
                             )}
                         </div>
                     </div>
 
-                    {/* Next Button & Footer Logos - ALWAYS VISIBLE ALL THE TIME */}
+                    {/* Next Button — shows 'Next Section' label when at end of a section */}
                     <div className="flex items-center gap-3">
-                        <button
-                            onClick={() => setCurrentIndex((prev) => Math.min(questions.length - 1, prev + 1))}
-                            disabled={currentIndex === questions.length - 1}
-                            id="exam-next-btn"
-                            className="px-6 sm:px-7 py-2.5 rounded-xl bg-[#E76F51] hover:bg-[#F4A261] text-white text-sm font-bold uppercase tracking-wider transition-colors duration-150 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer flex items-center space-x-2 shadow-[0_0_20px_rgba(231,111,81,0.35)] select-none"
-                        >
-                            <span>Next</span>
-                            <span>→</span>
-                            <span className="hidden sm:inline-block text-[10px] font-mono text-white/80 bg-black/20 px-1.5 py-0.5 rounded border border-white/20">[→]</span>
-                        </button>
+                        {(() => {
+                            const isLastInSection = activeSection >= 0 && currentIndex === SECTIONS[activeSection].end;
+                            const nextSec = isLastInSection && activeSection < SECTIONS.length - 1 ? SECTIONS[activeSection + 1] : null;
+                            const isLastQ = currentIndex === questions.length - 1;
+                            return (
+                                <button
+                                    onClick={() => setCurrentIndex((prev) => Math.min(questions.length - 1, prev + 1))}
+                                    disabled={isLastQ}
+                                    id="exam-next-btn"
+                                    className="px-5 sm:px-6 py-2.5 rounded-xl bg-[#E76F51] hover:bg-[#F4A261] text-white text-xs sm:text-sm font-bold uppercase tracking-wider transition-colors duration-150 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer flex flex-col items-center justify-center shadow-[0_0_20px_rgba(231,111,81,0.35)] select-none leading-tight"
+                                >
+                                    {nextSec ? (
+                                        <>
+                                            <span className="text-[9px] opacity-80 font-normal normal-case tracking-normal">
+                                                Next: {nextSec.label}
+                                            </span>
+                                            <span className="flex items-center gap-1">Next →</span>
+                                        </>
+                                    ) : (
+                                        <span className="flex items-center gap-1">Next →</span>
+                                    )}
+                                </button>
+                            );
+                        })()}
                         <div className="hidden sm:flex items-center pl-2 border-l border-[rgba(42,157,143,0.3)]">
                             <FooterLogos size="small" />
                         </div>
@@ -911,36 +1021,56 @@ export default function ExamPage() {
                                 </button>
                             </div>
 
-                            <div className="grid grid-cols-5 gap-2 overflow-y-auto py-4">
-                                {questions.map((q, idx) => {
-                                    const isAnswered = Boolean(answers[q.question_id]);
-                                    const isMarked = Boolean(marks[q.question_id]);
-                                    const isVisited = visited.has(q.question_id);
-                                    const isCurrent = idx === currentIndex;
-
-                                    let cellClasses = 'bg-[#122027] text-[#9CB6BF] border-[rgba(42,157,143,0.2)]';
-                                    if (isMarked) {
-                                        cellClasses = 'bg-[#E9C46A] text-[#122027] border-[#E9C46A] font-extrabold shadow-sm';
-                                    } else if (isAnswered) {
-                                        cellClasses = 'bg-[#2A9D8F] text-white border-[#2A9D8F] font-bold shadow-sm';
-                                    } else if (isVisited) {
-                                        cellClasses = 'bg-[#264653] text-white border-[rgba(42,157,143,0.3)] font-medium shadow-sm';
-                                    }
-
-                                    const formattedNum = (idx + 1).toString().padStart(2, '0');
-
+                            {/* Section-grouped mobile grid */}
+                            <div className="overflow-y-auto py-4 space-y-5">
+                                {SECTIONS.map((sec, si) => {
+                                    const secQuestions = questions.slice(sec.start, sec.end + 1);
+                                    const secAnswered = secQuestions.filter(q => answers[q?.question_id]).length;
                                     return (
-                                        <button
-                                            key={q.question_id || idx}
-                                            onClick={() => {
-                                                setCurrentIndex(idx);
-                                                setShowMobileDrawer(false);
-                                            }}
-                                            className={`h-11 rounded-lg border text-sm flex items-center justify-center font-mono font-bold transition-colors duration-150 cursor-pointer ${cellClasses} ${isCurrent ? 'ring-2 ring-[#E76F51] !border-[#E76F51] font-extrabold' : ''
-                                                }`}
-                                        >
-                                            {formattedNum}
-                                        </button>
+                                        <div key={sec.label}>
+                                            <div
+                                                className="flex items-center justify-between text-[10px] font-mono font-bold uppercase tracking-widest mb-2"
+                                                style={{ color: sec.color }}
+                                            >
+                                                <span className="flex items-center gap-1.5">
+                                                    <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: sec.color }} />
+                                                    {sec.label}
+                                                </span>
+                                                <span>{secAnswered}/{sec.count}</span>
+                                            </div>
+                                            <div className="grid grid-cols-5 gap-2">
+                                                {secQuestions.map((q, i) => {
+                                                    const idx = sec.start + i;
+                                                    const isAnswered = Boolean(answers[q.question_id]);
+                                                    const isMarked = Boolean(marks[q.question_id]);
+                                                    const isVisited = visited.has(q.question_id);
+                                                    const isCurrent = idx === currentIndex;
+
+                                                    let cellClasses = 'bg-[#122027] text-[#9CB6BF] border-[rgba(42,157,143,0.2)]';
+                                                    if (isMarked) {
+                                                        cellClasses = 'bg-[#E9C46A] text-[#122027] border-[#E9C46A] font-extrabold shadow-sm';
+                                                    } else if (isAnswered) {
+                                                        cellClasses = 'bg-[#2A9D8F] text-white border-[#2A9D8F] font-bold shadow-sm';
+                                                    } else if (isVisited) {
+                                                        cellClasses = 'bg-[#264653] text-white border-[rgba(42,157,143,0.3)] font-medium shadow-sm';
+                                                    }
+
+                                                    const formattedNum = (idx + 1).toString().padStart(2, '0');
+                                                    return (
+                                                        <button
+                                                            key={q.question_id || idx}
+                                                            onClick={() => {
+                                                                setCurrentIndex(idx);
+                                                                setShowMobileDrawer(false);
+                                                            }}
+                                                            className={`h-11 rounded-lg border text-sm flex items-center justify-center font-mono font-bold transition-colors duration-150 cursor-pointer ${cellClasses} ${isCurrent ? 'ring-2 ring-[#E76F51] !border-[#E76F51] font-extrabold' : ''}`}
+                                                        >
+                                                            {formattedNum}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
                                     );
                                 })}
                             </div>
