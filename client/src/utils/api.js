@@ -1,4 +1,13 @@
-const API_URL = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' && window.location.hostname ? `http://${window.location.hostname}:3000` : 'http://localhost:3000');
+function getApiUrl() {
+    if (typeof window !== 'undefined' && window.location.hostname) {
+        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+            return `http://${window.location.hostname}:3000`;
+        }
+    }
+    return import.meta.env.VITE_API_URL || 'http://localhost:3000';
+}
+
+const API_URL = getApiUrl();
 
 /**
  * Universal authenticated API fetch helper for Admin calls.

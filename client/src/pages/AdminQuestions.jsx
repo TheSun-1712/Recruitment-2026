@@ -1,6 +1,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { API_URL } from "../utils/api";
 
 // DSA partial scoring requires exact TC counts per slot
 const DSA_REQUIRED_TC = { 0: 3, 1: 2, 2: 2, 3: 3, 4: 3 };
@@ -49,7 +50,7 @@ export default function AdminQuestions() {
         setError("");
         try {
             const res = await fetch(
-                `${import.meta.env.VITE_API_URL}/admin/questions/${round}`,
+                `${API_URL}/admin/questions/${round}`,
                 { headers: { Authorization: `Bearer ${token}` } }
             );
             const data = await res.json();
@@ -72,7 +73,7 @@ export default function AdminQuestions() {
     // Fetch test cases when expanding a card and opening edit
     async function fetchTestCases(questionId) {
         const res = await fetch(
-            `${import.meta.env.VITE_API_URL}/admin/questions/${questionId}/testcases`,
+            `${API_URL}/admin/questions/${questionId}/testcases`,
             { headers: { Authorization: `Bearer ${token}` } }
         );
         return res.ok ? await res.json() : [];
@@ -152,8 +153,8 @@ export default function AdminQuestions() {
 
         try {
             const url = editingId
-                ? `${import.meta.env.VITE_API_URL}/admin/questions/${editingId}`
-                : `${import.meta.env.VITE_API_URL}/admin/questions`;
+                ? `${API_URL}/admin/questions/${editingId}`
+                : `${API_URL}/admin/questions`;
             const method = editingId ? "PUT" : "POST";
 
             const res = await fetch(url, {
@@ -187,7 +188,7 @@ export default function AdminQuestions() {
         setError("");
         try {
             const res = await fetch(
-                `${import.meta.env.VITE_API_URL}/admin/questions/${q.id}`,
+                `${API_URL}/admin/questions/${q.id}`,
                 {
                     method: "DELETE",
                     headers: {

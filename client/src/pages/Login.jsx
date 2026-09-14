@@ -2,21 +2,26 @@ import { useState } from "react";
 import IntroSection from "../components/IntroSection";
 import HeroSection from "../components/HeroSection";
 import AnimatedShaderHero from "../components/ui/animated-shader-hero";
+import { API_URL } from "../utils/api";
 
 export default function Login({ onJoin, showBackground = true }) {
   const [token, setToken] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  async function handleJoin() {
-    if (!token) return;
+  async function handleJoin(e) {
+    if (e?.preventDefault) e.preventDefault();
+    if (!token.trim()) return;
 
     setLoading(true);
+    setError("");
+
     try {
       if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
         await document.documentElement.requestFullscreen().catch(() => {});
       }
 
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/auth/join`, {
+      const res = await fetch(`${API_URL}/auth/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),

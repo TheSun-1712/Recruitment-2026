@@ -2,6 +2,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import FooterLogos from "../components/FooterLogos";
+import { API_URL } from "../utils/api";
 
 export default function AdminLogin() {
     const [username, setUsername] = useState("");
@@ -12,7 +13,7 @@ export default function AdminLogin() {
     async function handleLogin(e) {
         e.preventDefault();
         try {
-            const res = await fetch(`${import.meta.env.VITE_API_URL}/admin/login`, {
+            const res = await fetch(`${API_URL}/admin/login`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ username, password }),
