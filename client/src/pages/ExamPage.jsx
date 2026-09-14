@@ -142,9 +142,9 @@ export default function ExamPage() {
         contestEnded: isSubmitted,
         teamName: session?.candidateName || session?.rollNo || 'Unknown',
         backendUrl: API_URL,
+        maxViolations: 10,
         onDisqualify: () => {
-            sessionStorage.removeItem('examSession');
-            navigate('/login');
+            handleFinalSubmit();
         },
     });
 
@@ -524,7 +524,7 @@ export default function ExamPage() {
                             <p className="text-sm text-[#9CB6BF] leading-relaxed">{warningMessage}</p>
                             {isViolation && violationCount > 0 && (
                                 <div className="inline-block px-4 py-2 bg-[#E76F51]/15 border border-[#E76F51]/30 rounded-lg text-sm font-mono text-[#E76F51] font-bold">
-                                    Violations: {violationCount}
+                                    Violations: {violationCount} / {maxViolations || 10}
                                 </div>
                             )}
                             <button

@@ -20,7 +20,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
  */
 
 // ─── Configurable constants ────────────────────────────────────────────────────
-const MAX_VIOLATIONS = 100;
+const DEFAULT_MAX_VIOLATIONS = 10;
 // ──────────────────────────────────────────────────────────────────────────────
 
 // --- Passive DevTools detection helpers (defined once outside the hook) ---
@@ -71,7 +71,7 @@ function checkDevToolsViaConsole(onDetected) {
     }
 }
 
-export default function useContestProctoring(contestPrefix, { contestEnded = false, onDisqualify = null, teamName = null, backendUrl = null } = {}) {
+export default function useContestProctoring(contestPrefix, { contestEnded = false, onDisqualify = null, teamName = null, backendUrl = null, maxViolations = DEFAULT_MAX_VIOLATIONS } = {}) {
     const STORAGE_KEY = `${contestPrefix}_violations`;
 
     const [showWarning, setShowWarning] = useState(false);
@@ -125,7 +125,7 @@ export default function useContestProctoring(contestPrefix, { contestEnded = fal
                 const payload = JSON.stringify({
                     team_name: teamNameRef.current || "Unknown Team",
                     round: contestPrefix,
-                    violations: MAX_VIOLATIONS,
+                    violations: maxViolations,
                 });
                 fetch(`${url}/admin/disqualify-report`, {
                     method: "POST",
@@ -137,16 +137,23 @@ export default function useContestProctoring(contestPrefix, { contestEnded = fal
         } catch (_) { /* non-critical */ }
 
         setIsViolation(true);
-        setWarningTitle("Disqualified");
+        setWarningTitle("Exam Terminated");
         setWarningMessage(
-            "You have been disqualified for repeated violations. This incident has been recorded and reported to the admin."
+            `You have exceeded the maximum allowed security violations (${maxViolations}). Your exam has been automatically ended and submitted.`
         );
-        setWarningButtonText("Exit Contest");
+        setWarningButtonText("View Submission");
         warningActionRef.current = () => {
+            setShowWarning(false);
+            isShowingWarningRef.current = false;
             onDisqualify?.();
         };
         setShowWarning(true);
-    }, [onDisqualify, contestPrefix]);
+
+        // Automatically trigger disqualification/submission
+        if (onDisqualify) {
+            onDisqualify();
+        }
+    }, [onDisqualify, contestPrefix, maxViolations]);
 
     /**
      * showOverlay — increment FIRST, then check if the new count hits the limit.
@@ -160,7 +167,7 @@ export default function useContestProctoring(contestPrefix, { contestEnded = fal
         sessionStorage.setItem(STORAGE_KEY, String(next));
         setViolationCount(next);
 
-        if (next >= MAX_VIOLATIONS) {
+        if (next >= maxViolations) {
             triggerDisqualification();
             return;
         }
@@ -172,7 +179,7 @@ export default function useContestProctoring(contestPrefix, { contestEnded = fal
         setWarningButtonText(buttonText);
         warningActionRef.current = action;
         setShowWarning(true);
-    }, [STORAGE_KEY, triggerDisqualification]);
+    }, [STORAGE_KEY, triggerDisqualification, maxViolations]);
 
     /**
      * showFullscreenPrompt — prompts the user to enter fullscreen without penalizing
@@ -386,7 +393,7 @@ export default function useContestProctoring(contestPrefix, { contestEnded = fal
         warningButtonText,
         warningAction: dismissWarning,
         violationCount,
-        maxViolations: MAX_VIOLATIONS,
+        maxViolations,
         isViolation,
         cleanupProctoring,
     };
